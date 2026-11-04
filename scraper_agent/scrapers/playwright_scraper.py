@@ -18,6 +18,35 @@ from scraper_agent.config import SCRAPER_CONFIG
 
 logger = logging.getLogger(__name__)
 
+DISALLOWED_URL_PATTERNS = [
+    r"/(?:product|products|solution|solutions|pricing|features|feature|customers|case-studies|blog|news|docs|documentation|events|webinars|press|legal|privacy|terms|about-us|platform|security|overview|demo)/",
+    r"\.(?:pdf|png|jpg|jpeg|gif|svg|zip|mp4)$",
+]
+
+
+def is_valid_job_url(job_url: str) -> bool:
+    """Validates that a URL points to an actual job posting and not a product or marketing page."""
+    if not job_url or not job_url.startswith("http"):
+        return False
+    u = job_url.lower()
+    for pat in DISALLOWED_URL_PATTERNS:
+        if re.search(pat, u):
+            return False
+    # Known ATS domains are immediately recognized
+    if any(ats in u for ats in [
+        "greenhouse.io", "lever.co", "myworkdayjobs.com", "ashbyhq.com",
+        "icims.com", "taleo.net", "smartrecruiters.com", "bamboohr.com", "jobvite.com"
+    ]):
+        return True
+    # Path contains clear job indicators with identifiers or slugs
+    if re.search(r"/(?:job|jobs|position|positions|posting|postings)/\S+", u):
+        return True
+    if re.search(r"/careers?/[a-z0-9_-]+/[0-9a-z_-]+", u):
+        return True
+    if "gh_jid=" in u or "job_id=" in u or "jid=" in u:
+        return True
+    return False
+
 
 class PlaywrightCareerScraper(BaseScraper):
     """
@@ -145,25 +174,56 @@ class PlaywrightCareerScraper(BaseScraper):
                 break
             try:
                 title = (elem.inner_text() or "").strip()
-                if not title or len(title) < 4 or len(title) > 150:
+                if not title:
                     continue
-                # Skip navigation links like "View all jobs", "Back to careers", etc.
-                if any(bad in title.lower() for bad in ["view all", "back to", "search jobs", "apply now", "learn more"]):
+
+                # Check if anchor is an action button (e.g. "Apply", "View Job", "Read More")
+                # and retrieve the actual job title from the enclosing card heading
+                if any(bad in title.lower() for bad in ["view all", "back to", "search jobs", "all jobs"]):
+                    continue
+
+                if title.lower() in ["apply", "apply now", "view", "view job", "details", "read more", "learn more"] or len(title) < 4:
+                    heading = elem.evaluate("""el => {
+                        let cur = el;
+                        for (let i = 0; i < 5 && cur && cur.parentElement && cur.tagName !== 'BODY'; i++) {
+                            cur = cur.parentElement;
+                            const h = cur.querySelector('h1, h2, h3, h4, h5, [class*="title"], [class*="heading"]');
+                            if (h && h.innerText.trim().length >= 4) {
+                                return h.innerText.trim();
+                            }
+                        }
+                        return null;
+                    }""")
+                    if heading and len(heading) >= 4:
+                        title = heading
+                    else:
+                        continue
+
+                if len(title) < 4 or len(title) > 150:
                     continue
 
                 href = elem.get_attribute("href") or ""
                 job_url = urljoin(base_url, href) if href else base_url
+                if not is_valid_job_url(job_url):
+                    continue
                 if job_url in seen_urls:
                     continue
                 seen_urls.add(job_url)
 
                 # Try to extract surrounding location and details
-                parent = elem.evaluate_handle("el => el.closest('li, div.opening, div.posting, tr, [role=\"listitem\"], article')")
+                raw_loc = elem.evaluate("""el => {
+                    const card = el.closest('li, div.opening, div.posting, tr, [role="listitem"], article, div[class*="layout"]');
+                    if (!card) return null;
+                    const loc = card.querySelector('.location, [class*="location"], [data-automation-id*="location"], [data-qa*="location"], .posting-categories .location, span.sort-by-location');
+                    return loc ? loc.innerText.trim() : null;
+                }""") or ""
+
+                parent = elem.evaluate_handle("el => el.closest('li, div.opening, div.posting, tr, [role=\"listitem\"], article, div[class*=\"layout\"]')")
                 parent_text = ""
-                raw_loc = ""
-                if parent:
-                    parent_text = parent.as_element().inner_text() if parent.as_element() else ""
-                    raw_loc = self._extract_location_from_text(parent_text, title)
+                if parent and parent.as_element():
+                    parent_text = parent.as_element().inner_text() or ""
+                    if not raw_loc:
+                        raw_loc = self._extract_location_from_text(parent_text, title)
 
                 # Generate clean ID
                 ext_id = self._generate_job_id(job_url, title)
@@ -173,7 +233,7 @@ class PlaywrightCareerScraper(BaseScraper):
                         external_job_id=ext_id,
                         title=title,
                         raw_description=parent_text or title,
-                        raw_location=raw_loc or "Remote / Unspecified",
+                        raw_location=raw_loc or "",
                         job_url=job_url,
                         application_url=job_url,
                         posted_at=datetime.now(timezone.utc),
@@ -223,22 +283,23 @@ class PlaywrightCareerScraper(BaseScraper):
             if len(posts) >= max_jobs:
                 break
             href = a["href"]
-            if any(k in href.lower() for k in ["/job", "/career", "gh_jid", "position"]):
-                title = a.get_text().strip()
-                if 4 < len(title) < 120 and title not in seen:
-                    seen.add(title)
-                    full_url = urljoin(base_url, href)
-                    posts.append(
-                        RawJobPost(
-                            external_job_id=self._generate_job_id(full_url, title),
-                            title=title,
-                            raw_description=title,
-                            raw_location="",
-                            job_url=full_url,
-                            application_url=full_url,
-                            posted_at=datetime.now(timezone.utc),
-                        )
+            full_url = urljoin(base_url, href)
+            if not is_valid_job_url(full_url):
+                continue
+            title = a.get_text().strip()
+            if 4 < len(title) < 120 and title not in seen:
+                seen.add(title)
+                posts.append(
+                    RawJobPost(
+                        external_job_id=self._generate_job_id(full_url, title),
+                        title=title,
+                        raw_description=title,
+                        raw_location="",
+                        job_url=full_url,
+                        application_url=full_url,
+                        posted_at=datetime.now(timezone.utc),
                     )
+                )
         return posts
 
     @staticmethod
@@ -247,9 +308,15 @@ class PlaywrightCareerScraper(BaseScraper):
         cleaned = block_text.replace(title, "").strip()
         lines = [line.strip() for line in cleaned.split("\n") if line.strip()]
         for line in lines:
-            if any(k in line.lower() for k in ["remote", "hybrid", "usa", "san francisco", "new york", "london", "berlin", "austin", "ca", "ny", "tx"]):
+            line_lower = line.lower()
+            if any(k in line_lower for k in [
+                "remote", "hybrid", "on-site", "onsite", "usa", "united states",
+                "san francisco", "new york", "austin", "seattle", "boston", "denver",
+                "los angeles", "chicago", "hawthorne", "el segundo", "sunnyvale",
+                ", ca", ", tx", ", ny", ", wa", ", ma", ", co", ", fl", ", va"
+            ]):
                 return line
-        return lines[0] if lines else ""
+        return ""
 
     @staticmethod
     def _generate_job_id(job_url: str, title: str) -> str:

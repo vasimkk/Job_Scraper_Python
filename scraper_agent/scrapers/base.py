@@ -58,13 +58,20 @@ class BaseScraper(ABC):
         return cleaned
 
     @staticmethod
-    def fetch_job_page_details(job_url: str) -> Optional[str]:
+    def fetch_job_deep_info(job_url: str) -> dict:
         """
-        Fetches the full job description from the direct job posting page.
-        Extracts main content containers (e.g. description, content, posting-page).
+        Deep-fetches job description, location, title, and employment metadata from the job page.
+        Returns a dict: {'description': Optional[str], 'location': Optional[str], 'title': Optional[str], 'employment_type': Optional[str]}
         """
+        import json
+        result = {
+            "description": None,
+            "location": None,
+            "title": None,
+            "employment_type": None,
+        }
         if not job_url or not job_url.startswith("http"):
-            return None
+            return result
         try:
             resp = requests.get(
                 job_url,
@@ -72,11 +79,57 @@ class BaseScraper(ABC):
                     "User-Agent": SCRAPER_CONFIG.user_agent,
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
-                timeout=6,
+                timeout=7,
             )
             if resp.status_code == 200 and resp.text:
                 soup = BeautifulSoup(resp.text, "html.parser")
-                # Look for common job description containers
+
+                # 1. Check schema.org JSON-LD
+                for s in soup.find_all("script", type="application/ld+json"):
+                    try:
+                        data = json.loads(s.string)
+                        if isinstance(data, dict):
+                            if data.get("@type") == "JobPosting":
+                                if data.get("title"):
+                                    result["title"] = str(data["title"]).strip()
+                                if data.get("employmentType"):
+                                    result["employment_type"] = str(data["employmentType"]).strip()
+                                job_loc = data.get("jobLocation")
+                                if isinstance(job_loc, dict):
+                                    addr = job_loc.get("address", {})
+                                    if isinstance(addr, dict):
+                                        loc_parts = [
+                                            addr.get("addressLocality"),
+                                            addr.get("addressRegion"),
+                                            addr.get("addressCountry"),
+                                        ]
+                                        valid_locs = [p for p in loc_parts if p and isinstance(p, str)]
+                                        if valid_locs:
+                                            result["location"] = ", ".join(valid_locs)
+                    except Exception:
+                        pass
+
+                # 2. Extract Location if not found in JSON-LD
+                if not result["location"]:
+                    loc_el = soup.select_one(
+                        ".location, [class*='location'], [data-automation-id*='location'], "
+                        "[data-qa*='location'], [data-testid*='location'], .job-location, "
+                        ".posting-categories .location, dd[class*='location']"
+                    )
+                    if loc_el:
+                        loc_text = loc_el.get_text(separator=" ", strip=True)
+                        if loc_text and len(loc_text) < 100 and not any(bad in loc_text.lower() for bad in ["unspecified", "not specified"]):
+                            result["location"] = loc_text
+
+                # 3. Extract Title if not found in JSON-LD
+                if not result["title"]:
+                    h1_el = soup.find("h1")
+                    if h1_el:
+                        h1_text = h1_el.get_text(strip=True)
+                        if 4 < len(h1_text) < 150 and not any(bad in h1_text.lower() for bad in ["apply", "welcome", "careers", "job search"]):
+                            result["title"] = h1_text
+
+                # 4. Extract Description
                 for sel in [
                     "#content",
                     ".content",
@@ -93,15 +146,26 @@ class BaseScraper(ABC):
                     if el:
                         text = el.get_text(separator="\n", strip=True)
                         if len(text) > 120:
-                            return BaseScraper.clean_html(text)
-                body = soup.find("body")
-                if body:
-                    text = body.get_text(separator="\n", strip=True)
-                    if len(text) > 120:
-                        return BaseScraper.clean_html(text[:5000])
+                            result["description"] = BaseScraper.clean_html(text)
+                            break
+                if not result["description"]:
+                    body = soup.find("body")
+                    if body:
+                        text = body.get_text(separator="\n", strip=True)
+                        if len(text) > 120:
+                            result["description"] = BaseScraper.clean_html(text[:5000])
         except Exception:
             pass
-        return None
+        return result
+
+    @staticmethod
+    def fetch_job_page_details(job_url: str) -> Optional[str]:
+        """
+        Fetches the full job description from the direct job posting page.
+        Extracts main content containers (e.g. description, content, posting-page).
+        """
+        info = BaseScraper.fetch_job_deep_info(job_url)
+        return info.get("description")
 
     @staticmethod
     def compute_content_hash(

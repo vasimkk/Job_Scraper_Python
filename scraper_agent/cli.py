@@ -163,6 +163,18 @@ def main():
         default=24,
         help="Interval in hours for --daily mode (default: 24 hours)",
     )
+    parser.add_argument(
+        "--target-jobs",
+        type=int,
+        default=0,
+        help="Target total number of jobs to store in the database (e.g. 1000)",
+    )
+    parser.add_argument(
+        "--limit-per-industry",
+        type=int,
+        default=0,
+        help="Maximum companies to scrape per industry",
+    )
 
     args = parser.parse_args()
 
@@ -222,6 +234,8 @@ def main():
         target_company=args.company,
         target_url=args.url,
         dynamic_discovery=dynamic_disc,
+        target_jobs=args.target_jobs,
+        limit_per_industry=args.limit_per_industry,
     )
 
 

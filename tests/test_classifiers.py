@@ -78,6 +78,21 @@ class TestClassifiers(unittest.TestCase):
         self.assertEqual(state, "TX")
         self.assertEqual(country, "United States")
 
+        # Unspecified / Remote noise cases
+        city, state, country, remote_type = parse_location("Remote / Unspecified")
+        self.assertIsNone(city)
+        self.assertEqual(remote_type, "REMOTE")
+        self.assertEqual(country, "United States")
+
+        city, state, country, remote_type = parse_location("/ Unspecified")
+        self.assertIsNone(city)
+
+        # Single city resolution
+        city, state, country, remote_type = parse_location("San Francisco")
+        self.assertEqual(city, "San Francisco")
+        self.assertEqual(state, "CA")
+        self.assertEqual(country, "United States")
+
 
 if __name__ == "__main__":
     unittest.main()

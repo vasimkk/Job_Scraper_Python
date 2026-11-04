@@ -257,7 +257,7 @@ class ScraperAgent:
             # Classify into Full-Time vs Contract branches
             full_time_branch: List[Tuple[RawJobPost, List[str], str]] = []
             contract_branch: List[Tuple[RawJobPost, List[str], str]] = []
-            other_branch: List[Tuple[RawJobPost, List[str], str]] = []
+            excluded_other_count = 0
 
             for raw_job, tech_kw in tech_jobs:
                 emp_type = JDAnalyzer.deduce_employment_type_from_jd(
@@ -270,42 +270,49 @@ class ScraperAgent:
                 elif emp_type == "CONTRACT":
                     contract_branch.append((raw_job, tech_kw, emp_type))
                 else:
-                    other_branch.append((raw_job, tech_kw, emp_type))
+                    # User requirement: ONLY scrape Full-Time and Contract jobs (strictly filter out others)
+                    excluded_other_count += 1
+                    if emp_type == "PART_TIME":
+                        self.session_stats["part_time_jobs"] += 1
+                    elif emp_type == "INTERNSHIP":
+                        self.session_stats["internship_jobs"] += 1
 
             console.print(
                 f"  [bold green]▶ Step 6 (Check Job in DB & Classify Employment Type):[/bold green]\n"
                 f"    ├── [bold magenta]PostgreSQL Status:[/bold magenta] {new_in_db} New Job(s) to Scrape | {existing_in_db} Already in DB\n"
                 f"    ├── [bold cyan]Full-Time Jobs Branch:[/bold cyan] {len(full_time_branch)}\n"
                 f"    └── [bold yellow]Contract Jobs Branch:[/bold yellow] {len(contract_branch)}"
-                + (f" [dim](+ {len(other_branch)} other: intern/part-time)[/dim]" if other_branch else "")
+                + (f" [dim](strictly excluded {excluded_other_count} non-FT/contract: intern/part-time)[/dim]" if excluded_other_count else "")
             )
 
             # Step 7: Scrape Job Details (Full JD, Tech Role, Location, Content Hash)
-            all_classified = full_time_branch + contract_branch + other_branch
+            # User requirement: ONLY scrape Full-Time and Contract jobs, NO other
+            target_classified = full_time_branch + contract_branch
             processed_jobs: List[ProcessedJob] = []
 
             console.print(
-                f"  [bold green]▶ Step 7 (Scrape Job Details):[/bold green] Fetching full JD descriptions, deducing Tech Roles & attributes..."
+                f"  [bold green]▶ Step 7 (Scrape Job Details):[/bold green] Fetching full JD descriptions, deducing Tech Roles & attributes for {len(target_classified)} Full-Time & Contract jobs..."
             )
 
-            for raw_job, tech_kw, emp_type in all_classified:
+            for raw_job, tech_kw, emp_type in target_classified:
                 # Update session employment counts
                 if emp_type == "FULL_TIME":
                     self.session_stats["full_time_jobs"] += 1
                 elif emp_type == "CONTRACT":
                     self.session_stats["contract_jobs"] += 1
-                elif emp_type == "PART_TIME":
-                    self.session_stats["part_time_jobs"] += 1
-                elif emp_type == "INTERNSHIP":
-                    self.session_stats["internship_jobs"] += 1
 
-                # If raw_description is very short, fetch deep page content
+                # If description is short or location/title is missing, fetch deep page details
                 desc = raw_job.raw_description
-                if len(desc) < 80 and raw_job.job_url and raw_job.job_url.startswith("http"):
-                    deep_desc = BaseScraper.fetch_job_page_details(raw_job.job_url)
-                    if deep_desc:
-                        desc = deep_desc
-                        raw_job.raw_description = deep_desc
+                if raw_job.job_url and raw_job.job_url.startswith("http"):
+                    if len(desc) < 120 or not raw_job.raw_location or raw_job.title.lower() in ["apply", "apply now", "view job"]:
+                        deep_info = BaseScraper.fetch_job_deep_info(raw_job.job_url)
+                        if deep_info.get("description"):
+                            desc = deep_info["description"]
+                            raw_job.raw_description = desc
+                        if deep_info.get("location") and not raw_job.raw_location:
+                            raw_job.raw_location = deep_info["location"]
+                        if deep_info.get("title") and (raw_job.title.lower() in ["apply", "apply now", "view job"] or len(raw_job.title) < 5):
+                            raw_job.title = deep_info["title"]
 
                 # Deduce Tech Role from Job Description
                 tech_role = JDAnalyzer.deduce_tech_role_from_jd(
@@ -407,10 +414,22 @@ class ScraperAgent:
             description=raw_job.raw_description,
         )
 
+        # Build clean display location: NEVER allow '/ Unspecified' or dummy noise
+        clean_display_loc = raw_job.raw_location
+        if not clean_display_loc or any(n in clean_display_loc.lower() for n in ["unspecified", "not specified", "n/a", "none"]):
+            if city and state:
+                clean_display_loc = f"{city}, {state}, {country}"
+            elif state:
+                clean_display_loc = f"{state}, {country}"
+            elif remote_type == "REMOTE":
+                clean_display_loc = "Remote, United States"
+            else:
+                clean_display_loc = country or "United States"
+
         content_hash = BaseScraper.compute_content_hash(
             title=raw_job.title,
             description=raw_job.raw_description,
-            location=raw_job.raw_location,
+            location=clean_display_loc,
             employment_type=employment_type,
         )
 
@@ -420,7 +439,7 @@ class ScraperAgent:
             external_job_id=raw_job.external_job_id,
             title=raw_job.title,
             description=raw_job.raw_description,
-            location=raw_job.raw_location,
+            location=clean_display_loc,
             city=city,
             state=state,
             country=country,
