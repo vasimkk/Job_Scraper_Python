@@ -11,6 +11,127 @@ class JobRepository:
     """Repository handling all database operations for companies, sources, jobs, and scrape runs."""
 
     @staticmethod
+    def get_or_create_company(
+        name: str,
+        domain: Optional[str] = None,
+        career_url: Optional[str] = None,
+        industry: Optional[str] = None,
+    ) -> Company:
+        """
+        Dynamically retrieves an existing company or creates a new record.
+        Ensures dynamic company discovery without any hardcoded names.
+        """
+        clean_name = name.strip()
+        with get_dict_cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, domain, career_url, industry, active, created_at, updated_at
+                FROM companies
+                WHERE LOWER(name) = LOWER(%s)
+                """,
+                (clean_name,),
+            )
+            row = cur.fetchone()
+            if row:
+                # Update missing fields if new info discovered
+                comp = Company(**row)
+                needs_update = False
+                update_fields = []
+                params = []
+                if not comp.industry and industry:
+                    update_fields.append("industry = %s")
+                    params.append(industry)
+                    needs_update = True
+                if not comp.career_url and career_url:
+                    update_fields.append("career_url = %s")
+                    params.append(career_url)
+                    needs_update = True
+                if not comp.domain and domain:
+                    update_fields.append("domain = %s")
+                    params.append(domain)
+                    needs_update = True
+
+                if needs_update:
+                    params.append(comp.id)
+                    with get_db_connection() as conn:
+                        with conn.cursor() as u_cur:
+                            set_clause = ", ".join(update_fields)
+                            u_cur.execute(
+                                f"UPDATE companies SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                                params,
+                            )
+                return comp
+
+        # Insert new company
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO companies (name, domain, career_url, industry, active)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    RETURNING id, name, domain, career_url, industry, active, created_at, updated_at
+                    """,
+                    (clean_name, domain, career_url, industry),
+                )
+                r = cur.fetchone()
+                return Company(
+                    id=r[0],
+                    name=r[1],
+                    domain=r[2],
+                    career_url=r[3],
+                    industry=r[4],
+                    active=r[5],
+                    created_at=r[6],
+                    updated_at=r[7],
+                )
+
+    @staticmethod
+    def get_or_create_job_source(
+        company_id: int, source_url: str, scraper_type: str
+    ) -> JobSource:
+        """
+        Dynamically retrieves or creates a job source for a company.
+        """
+        with get_dict_cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, company_id, source_url, scraper_type, active,
+                       last_run_at, last_success_at, last_failure_at, created_at, updated_at
+                FROM job_sources
+                WHERE company_id = %s AND source_url = %s
+                """,
+                (company_id, source_url),
+            )
+            row = cur.fetchone()
+            if row:
+                return JobSource(**row)
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO job_sources (company_id, source_url, scraper_type, active)
+                    VALUES (%s, %s, %s, TRUE)
+                    RETURNING id, company_id, source_url, scraper_type, active,
+                              last_run_at, last_success_at, last_failure_at, created_at, updated_at
+                    """,
+                    (company_id, source_url, scraper_type),
+                )
+                r = cur.fetchone()
+                return JobSource(
+                    id=r[0],
+                    company_id=r[1],
+                    source_url=r[2],
+                    scraper_type=r[3],
+                    active=r[4],
+                    last_run_at=r[5],
+                    last_success_at=r[6],
+                    last_failure_at=r[7],
+                    created_at=r[8],
+                    updated_at=r[9],
+                )
+
+    @staticmethod
     def get_distinct_industries() -> List[str]:
         """Fetch all unique industries present in the companies table."""
         with get_dict_cursor() as cur:
@@ -65,6 +186,28 @@ class JobRepository:
             )
             row = cur.fetchone()
             return Company(**row) if row else None
+
+    @staticmethod
+    def check_existing_jobs(
+        company_id: int, external_job_ids: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Flow Step 6: Checks PostgreSQL database for already stored jobs matching external_job_ids.
+        Returns a dictionary mapping external_job_id -> row data.
+        """
+        if not external_job_ids:
+            return {}
+        with get_dict_cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, external_job_id, content_hash, status, employment_type, tech_role, first_seen_at, last_seen_at
+                FROM jobs
+                WHERE company_id = %s AND external_job_id = ANY(%s)
+                """,
+                (company_id, external_job_ids),
+            )
+            rows = cur.fetchall()
+            return {r["external_job_id"]: r for r in rows}
 
     @staticmethod
     def get_company_by_id(company_id: int) -> Optional[Company]:
@@ -139,12 +282,12 @@ class JobRepository:
                 INSERT INTO jobs (
                     company_id, source_id, external_job_id, title, description,
                     location, city, state, country, remote_type, employment_type,
-                    posted_at, source_updated_at, first_seen_at, last_seen_at,
+                    tech_role, posted_at, source_updated_at, first_seen_at, last_seen_at,
                     job_url, application_url, content_hash, status
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                    %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
                     %s, %s, %s, %s
                 )
                 """,
@@ -160,6 +303,7 @@ class JobRepository:
                     job.country,
                     job.remote_type,
                     job.employment_type,
+                    job.tech_role,
                     job.posted_at,
                     job.source_updated_at,
                     job.job_url,
@@ -185,6 +329,7 @@ class JobRepository:
                     country = %s,
                     remote_type = %s,
                     employment_type = %s,
+                    tech_role = %s,
                     posted_at = COALESCE(%s, posted_at),
                     source_updated_at = COALESCE(%s, source_updated_at),
                     job_url = %s,
@@ -205,6 +350,7 @@ class JobRepository:
                     job.country,
                     job.remote_type,
                     job.employment_type,
+                    job.tech_role,
                     job.posted_at,
                     job.source_updated_at,
                     job.job_url,
@@ -374,6 +520,17 @@ class JobRepository:
             )
             remote_counts = cur.fetchall()
 
+            # Jobs by tech_role
+            cur.execute(
+                """
+                SELECT COALESCE(tech_role, 'Unclassified') as tech_role, count(*) as count
+                FROM jobs
+                GROUP BY tech_role
+                ORDER BY count DESC;
+                """
+            )
+            tech_role_counts = cur.fetchall()
+
             return {
                 "total_companies": total_companies,
                 "active_sources": active_sources,
@@ -381,4 +538,5 @@ class JobRepository:
                 "by_industry": industry_counts,
                 "by_employment_type": employment_counts,
                 "by_remote_type": remote_counts,
+                "by_tech_role": tech_role_counts,
             }

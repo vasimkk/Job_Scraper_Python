@@ -58,6 +58,52 @@ class BaseScraper(ABC):
         return cleaned
 
     @staticmethod
+    def fetch_job_page_details(job_url: str) -> Optional[str]:
+        """
+        Fetches the full job description from the direct job posting page.
+        Extracts main content containers (e.g. description, content, posting-page).
+        """
+        if not job_url or not job_url.startswith("http"):
+            return None
+        try:
+            resp = requests.get(
+                job_url,
+                headers={
+                    "User-Agent": SCRAPER_CONFIG.user_agent,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                timeout=6,
+            )
+            if resp.status_code == 200 and resp.text:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                # Look for common job description containers
+                for sel in [
+                    "#content",
+                    ".content",
+                    "#job-description",
+                    ".job-description",
+                    ".description",
+                    "[data-automation-id='jobPostingDescription']",
+                    ".posting-page",
+                    ".section-page",
+                    "main",
+                    "article",
+                ]:
+                    el = soup.select_one(sel)
+                    if el:
+                        text = el.get_text(separator="\n", strip=True)
+                        if len(text) > 120:
+                            return BaseScraper.clean_html(text)
+                body = soup.find("body")
+                if body:
+                    text = body.get_text(separator="\n", strip=True)
+                    if len(text) > 120:
+                        return BaseScraper.clean_html(text[:5000])
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
     def compute_content_hash(
         title: str,
         description: str,

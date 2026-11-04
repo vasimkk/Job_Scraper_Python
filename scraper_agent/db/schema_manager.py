@@ -23,6 +23,13 @@ def initialize_schema() -> None:
             cur.execute(
                 "ALTER TABLE companies ADD COLUMN IF NOT EXISTS industry VARCHAR(100);"
             )
+            # Ensure tech_role column exists on jobs
+            cur.execute(
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tech_role VARCHAR(100);"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_tech_role ON jobs(tech_role);"
+            )
 
     logger.info("Database schema initialized successfully.")
 

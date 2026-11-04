@@ -36,3 +36,7 @@ wheels/
 # Database & logs
 *.log
 
+# Playwright browsers
+.playwright_browsers/
+job-scraper-agent/
+

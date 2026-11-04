@@ -1,10 +1,8 @@
 import unittest
 from scraper_agent.scrapers.base import BaseScraper
 from scraper_agent.scrapers.registry import get_scraper_for_type
-from scraper_agent.scrapers.greenhouse import GreenhouseScraper
-from scraper_agent.scrapers.lever import LeverScraper
-from scraper_agent.scrapers.ashby import AshbyScraper
 from scraper_agent.scrapers.generic_html import GenericHtmlScraper
+from scraper_agent.scrapers.playwright_scraper import PlaywrightCareerScraper
 
 
 class TestScrapers(unittest.TestCase):
@@ -31,12 +29,12 @@ class TestScrapers(unittest.TestCase):
         self.assertNotEqual(h1, h3)
 
     def test_scraper_registry(self):
-        self.assertIsInstance(get_scraper_for_type("greenhouse"), GreenhouseScraper)
-        self.assertIsInstance(get_scraper_for_type("lever"), LeverScraper)
-        self.assertIsInstance(get_scraper_for_type("ashby"), AshbyScraper)
-        self.assertIsInstance(get_scraper_for_type("unknown_type"), GenericHtmlScraper)
+        self.assertIsInstance(get_scraper_for_type("playwright"), PlaywrightCareerScraper)
+        self.assertIsInstance(get_scraper_for_type("generic_html"), GenericHtmlScraper)
+        # Unknown/fallback types default to Playwright
+        self.assertIsInstance(get_scraper_for_type("career_page"), PlaywrightCareerScraper)
+        self.assertIsInstance(get_scraper_for_type("unknown"), PlaywrightCareerScraper)
 
 
 if __name__ == "__main__":
     unittest.main()
-

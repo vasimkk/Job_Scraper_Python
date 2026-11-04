@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     country VARCHAR(100),
     remote_type VARCHAR(50),
     employment_type VARCHAR(100),
+    tech_role VARCHAR(100),
     posted_at TIMESTAMP,
     source_updated_at TIMESTAMP,
     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_tech_role ON jobs(tech_role);
 CREATE INDEX IF NOT EXISTS idx_jobs_posted_at ON jobs(posted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at DESC);
 

@@ -12,57 +12,79 @@ if sys.platform == "win32":
         pass
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
+from rich.panel import Panel
 
 from scraper_agent.config import SCRAPER_CONFIG
 from scraper_agent.db.repository import JobRepository
-from scraper_agent.models.job import (
-    Company,
-    JobSource,
-    RawJobPost,
-    ProcessedJob,
-    ScrapeRunStats,
-)
-from scraper_agent.scrapers.registry import get_scraper_for_type
-from scraper_agent.scrapers.base import BaseScraper
+from scraper_agent.discovery.company_finder import DynamicJobDiscovery
+from scraper_agent.models.job import Company, JobSource, RawJobPost, ProcessedJob, ScrapeRunStats
 from scraper_agent.classifiers.tech_filter import is_technology_job
-from scraper_agent.classifiers.employment import classify_employment_type
 from scraper_agent.classifiers.location_parser import parse_location
+from scraper_agent.classifiers.date_filter import (
+    is_job_in_date_window,
+    get_freshness_cutoff,
+    format_freshness_window_description,
+)
+from scraper_agent.classifiers.jd_analyzer import JDAnalyzer
+from scraper_agent.scrapers.base import BaseScraper
+from scraper_agent.scrapers.registry import get_scraper_for_type
 
 logger = logging.getLogger(__name__)
 console = Console(highlight=False)
 
+DEFAULT_INDUSTRIES = [
+    "Information Technology",
+    "Healthcare",
+    "Finance",
+    "Energy",
+    "Defense",
+    "Cybersecurity",
+]
+
 
 class ScraperAgent:
     """
-    Main Orchestrator Agent executing the pipeline specified in the flow diagram:
-    
-    1. Start Scraper Agent
-    2. Identify Industry
-    3. Find Companies in Industry
-    4. Identify Posted Jobs
-    5. Filter Jobs by Technology Nature
-    6. Classify Employment Type (Full-Time vs Contract)
-    7. Scrape Job Details
-    8. Store Jobs in Database
-    9. End
+    Scraper Agent executing the exact pipeline:
+      1. Start Scraper Agent
+      2. Identify Industry
+      3. Find Companies in this Industry
+      4. In each company, Identify Posted Jobs (Filtered by Date: Prev + Current Month)
+      5. Filter Jobs by Technology Nature
+      6. Check Job in DB & Classify into Full-Time and Contract
+      7. Scrape Job Details (Full JD, Location, Remote Type, Tech Role, Content Hash)
+      8. Store Jobs in Database (PostgreSQL)
+      9. End
     """
 
-    def __init__(self, filter_tech_only: Optional[bool] = None):
+    def __init__(
+        self,
+        filter_tech_only: Optional[bool] = None,
+        enforce_date_window: bool = True,
+    ):
         self.repo = JobRepository()
+        self.discovery = DynamicJobDiscovery()
         self.filter_tech_only = (
             filter_tech_only
             if filter_tech_only is not None
             else SCRAPER_CONFIG.filter_tech_only
         )
+        self.enforce_date_window = enforce_date_window
+        self.freshness_cutoff = get_freshness_cutoff()
         self.session_stats = {
             "companies_processed": 0,
             "sources_scraped": 0,
             "jobs_found": 0,
+            "fresh_jobs_passed": 0,
+            "stale_jobs_skipped": 0,
             "tech_jobs_passed": 0,
+            "db_new_jobs": 0,
+            "db_existing_jobs": 0,
             "full_time_jobs": 0,
             "contract_jobs": 0,
+            "part_time_jobs": 0,
+            "internship_jobs": 0,
+            "tech_roles_breakdown": {},
             "new_stored": 0,
             "updated_stored": 0,
             "duplicates_stored": 0,
@@ -70,114 +92,235 @@ class ScraperAgent:
         }
 
     # Step 1: Start Scraper Agent
-    def start(self, target_industry: Optional[str] = None, target_company: Optional[str] = None) -> Dict[str, Any]:
+    def start(
+        self,
+        target_industry: Optional[str] = None,
+        target_company: Optional[str] = None,
+        target_url: Optional[str] = None,
+        dynamic_discovery: bool = True,
+    ) -> Dict[str, Any]:
         """Entry point that initializes and executes the complete agent workflow."""
         console.print(
             Panel.fit(
-                "[bold cyan]AutoJobApply – Scraper Agent[/bold cyan]\n"
-                "[dim]Workflow Execution: Industry -> Companies -> Posted Jobs -> Tech Filter -> Employment Classification -> Details Scrape -> Database Storage[/dim]",
+                "[bold cyan]AutoJobApply – Dynamic Scraper Agent (Playwright Career Scraper)[/bold cyan]\n"
+                "[dim]Workflow: Identify Industry -> Find Companies -> Identify Posted Jobs (Prev+Current Month) -> "
+                "Tech Nature -> Check DB & Classify (Full-Time/Contract) -> Scrape Details -> Store in DB[/dim]",
                 border_style="cyan",
             )
         )
 
-        # Step 2: Identify Industry
-        industry = self.identify_industry(target_industry)
-        console.print(f"[bold green]▶ Step 1 & 2:[/bold green] Agent started for industry: [yellow]{industry}[/yellow]")
-
-        # Step 3: Find Companies in Industry
-        companies = self.find_companies_in_industry(industry, company_filter=target_company)
-        if not companies:
-            console.print(f"[yellow]No active companies found for industry '{industry}'.[/yellow]")
+        # Handle direct career page URL mode via Playwright
+        if target_url:
+            console.print(f"[bold green]▶ Direct Career Page Mode (Playwright):[/bold green] [cyan]{target_url}[/cyan]")
+            company, source, raw_jobs = self.discovery.scrape_custom_url(
+                career_url=target_url, company_name=target_company, industry=target_industry
+            )
+            console.print(f"  [cyan]Playwright Scraped:[/cyan] Found [bold]{len(raw_jobs)}[/bold] job postings.")
+            self._process_single_company_pipeline(company, source, raw_jobs)
             return self.end()
 
+        # Step 2: Identify Industry
+        target_industries = self.identify_industry(target_industry)
         console.print(
-            f"[bold green]▶ Step 3:[/bold green] Found [cyan]{len(companies)}[/cyan] company(s) in [yellow]{industry}[/yellow]."
+            f"[dim]🗓 Freshness Window: {format_freshness_window_description()} (Cutoff: {self.freshness_cutoff.strftime('%Y-%m-%d')})[/dim]"
         )
 
-        # Process each company and its sources
-        for comp in companies:
-            self._process_company(comp)
+        for industry in target_industries:
+            console.print(f"\n[bold green]▶ Step 2 (Identify Industry):[/bold green] Target Industry: [bold yellow]{industry}[/bold yellow]")
+
+            # Step 3: Find Companies in Industry
+            companies_and_sources = self.find_companies_in_industry(
+                industry, company_filter=target_company
+            )
+            console.print(
+                f"[bold green]▶ Step 3 (Find Companies in Industry):[/bold green] Found [bold cyan]{len(companies_and_sources)}[/bold cyan] company(s) with career pages in [yellow]{industry}[/yellow]."
+            )
+
+            if not companies_and_sources:
+                console.print(f"  [dim]No companies found for industry '{industry}'. Proceeding...[/dim]")
+                continue
+
+            for company, source in companies_and_sources:
+                self._process_company(company, source)
 
         # Step 9: End
         return self.end()
 
     # Step 2: Identify Industry
-    def identify_industry(self, requested_industry: Optional[str] = None) -> str:
+    def identify_industry(self, requested_industry: Optional[str] = None) -> List[str]:
         """
-        Determines the target industry for job collection.
-        If None or 'ALL', processes all available industries.
+        Determines target industries for job collection.
+        If None or 'ALL', returns the list of all configured major industries.
+        Otherwise returns a single-item list with the specified industry.
         """
-        if requested_industry and requested_industry.strip():
-            return requested_industry.strip()
-        return "ALL"
+        if requested_industry and requested_industry.strip() and requested_industry.strip().upper() != "ALL":
+            return [requested_industry.strip()]
+        return DEFAULT_INDUSTRIES
 
     # Step 3: Find Companies in Industry
     def find_companies_in_industry(
         self, industry: str, company_filter: Optional[str] = None
-    ) -> List[Company]:
-        """Queries the database for active companies matching the target industry."""
-        if company_filter:
-            company = self.repo.get_company_by_name(company_filter)
-            return [company] if company else []
-        return self.repo.get_companies_by_industry(industry)
+    ) -> List[Tuple[Company, JobSource]]:
+        """
+        Flow Step 3: Queries the database and dynamic discovery to find active companies
+        operating in the identified industry along with their direct career page sources.
+        """
+        return self.discovery.find_companies_in_industry(industry, company_filter=company_filter)
 
-    def _process_company(self, company: Company) -> None:
-        """Processes all active job sources for a single company."""
-        sources = self.repo.get_active_sources_for_company(company.id)
-        if not sources:
-            console.print(f"  [dim]No active job sources for {company.name}. Skipping.[/dim]")
+    def _process_company(self, company: Company, source: JobSource) -> None:
+        """Executes steps 4 through 8 for a company and its career page source."""
+        self.session_stats["companies_processed"] += 1
+        self.session_stats["sources_scraped"] += 1
+
+        console.print(
+            f"\n[bold blue]🏢 Company:[/bold blue] {company.name} [dim]({company.industry or 'General'})[/dim] | [dim]{source.source_url}[/dim]"
+        )
+
+        # Step 4: Identify Posted Jobs on Career Page
+        console.print(f"  [bold green]▶ Step 4 (Identify Posted Jobs):[/bold green] Scraping career page with Playwright...")
+        raw_jobs = self.identify_posted_jobs(source)
+        self.session_stats["jobs_found"] += len(raw_jobs)
+        console.print(f"  [cyan]Playwright Scraped:[/cyan] Found [bold]{len(raw_jobs)}[/bold] posted jobs on career page.")
+
+        if not raw_jobs:
+            console.print(f"  [dim]No active job listings found on {source.source_url}.[/dim]")
             return
 
-        self.session_stats["companies_processed"] += 1
-        console.print(f"\n[bold blue]🏢 Company:[/bold blue] {company.name} [dim]({company.industry or 'General'})[/dim]")
+        self._process_single_company_pipeline(company, source, raw_jobs)
 
-        for source in sources:
-            self._process_source(company, source)
-
-    def _process_source(self, company: Company, source: JobSource) -> None:
-        """Executes steps 4 through 8 for a given job source."""
-        self.session_stats["sources_scraped"] += 1
+    def _process_single_company_pipeline(
+        self, company: Company, source: JobSource, raw_jobs: List[RawJobPost]
+    ) -> None:
+        """
+        Executes Steps 4 (Date Filter) -> 5 (Tech Nature) -> 6 (Check DB & Classify) -> 7 (Scrape Details) -> 8 (Store in DB).
+        """
         run_id = self.repo.start_scrape_run(source.id)
         started_at = datetime.now(timezone.utc)
         stats = ScrapeRunStats(source_id=source.id, started_at=started_at)
+        stats.jobs_found = len(raw_jobs)
 
         try:
-            # Step 4: Identify Posted Jobs
-            raw_jobs = self.identify_posted_jobs(source)
-            stats.jobs_found = len(raw_jobs)
-            self.session_stats["jobs_found"] += len(raw_jobs)
+            # Step 4 (continued): Date Filter (Previous Month + Current Month)
+            fresh_jobs: List[RawJobPost] = []
+            stale_count = 0
+            for job in raw_jobs:
+                if self.enforce_date_window:
+                    is_fresh, _ = is_job_in_date_window(job.posted_at, self.freshness_cutoff)
+                    if not is_fresh:
+                        stale_count += 1
+                        continue
+                fresh_jobs.append(job)
+
+            self.session_stats["fresh_jobs_passed"] += len(fresh_jobs)
+            self.session_stats["stale_jobs_skipped"] += stale_count
+
             console.print(
-                f"  [cyan]Source ({source.scraper_type}):[/cyan] Found [bold]{len(raw_jobs)}[/bold] posted jobs."
+                f"  [bold green]🗓 Date Window Filter (Prev + Current Month):[/bold green] "
+                f"[bold cyan]{len(fresh_jobs)}[/bold cyan] fresh postings retained"
+                + (f" ([dim]{stale_count} older than previous month skipped[/dim])" if stale_count else "")
+                + "."
             )
+
+            if not fresh_jobs:
+                stats.status = "SUCCESS"
+                self.repo.update_job_source_status(source.id, success=True)
+                return
 
             # Step 5: Filter Jobs by Technology Nature
-            tech_jobs, non_tech_count = self.filter_jobs_by_technology_nature(raw_jobs)
+            tech_jobs, non_tech_count = self.filter_jobs_by_technology_nature(fresh_jobs)
             self.session_stats["tech_jobs_passed"] += len(tech_jobs)
             console.print(
-                f"  [magenta]Tech Filter:[/magenta] Retained [bold green]{len(tech_jobs)}[/bold green] tech jobs ([dim]{non_tech_count} non-tech filtered out[/dim])."
+                f"  [bold green]▶ Step 5 (Filter by Tech Nature):[/bold green] [cyan]{len(tech_jobs)}[/cyan] tech jobs passed ([dim]{non_tech_count} non-tech filtered out[/dim])."
             )
 
-            # Step 6 & 7: Classify Employment Type & Scrape Job Details
-            processed_jobs: List[ProcessedJob] = []
-            for raw_job, tech_kw in tech_jobs:
-                # Step 6: Classify Employment Type (Full-Time vs Contract)
-                emp_type = self.classify_employment_type(raw_job)
-                if emp_type == "CONTRACT":
-                    self.session_stats["contract_jobs"] += 1
-                else:
-                    self.session_stats["full_time_jobs"] += 1
+            if not tech_jobs:
+                stats.status = "SUCCESS"
+                self.repo.update_job_source_status(source.id, success=True)
+                return
 
-                # Step 7: Scrape Job Details
+            # Step 6: Check this Job in DB & Classify Employment Type (Full-Time vs Contract)
+            job_ids = [j.external_job_id for j, _ in tech_jobs]
+            db_existing_map = self.repo.check_existing_jobs(company.id, job_ids)
+
+            new_in_db = sum(1 for jid in job_ids if jid not in db_existing_map)
+            existing_in_db = len(job_ids) - new_in_db
+            self.session_stats["db_new_jobs"] += new_in_db
+            self.session_stats["db_existing_jobs"] += existing_in_db
+
+            # Classify into Full-Time vs Contract branches
+            full_time_branch: List[Tuple[RawJobPost, List[str], str]] = []
+            contract_branch: List[Tuple[RawJobPost, List[str], str]] = []
+            other_branch: List[Tuple[RawJobPost, List[str], str]] = []
+
+            for raw_job, tech_kw in tech_jobs:
+                emp_type = JDAnalyzer.deduce_employment_type_from_jd(
+                    title=raw_job.title,
+                    description=raw_job.raw_description,
+                    metadata=raw_job.metadata,
+                )
+                if emp_type == "FULL_TIME":
+                    full_time_branch.append((raw_job, tech_kw, emp_type))
+                elif emp_type == "CONTRACT":
+                    contract_branch.append((raw_job, tech_kw, emp_type))
+                else:
+                    other_branch.append((raw_job, tech_kw, emp_type))
+
+            console.print(
+                f"  [bold green]▶ Step 6 (Check Job in DB & Classify Employment Type):[/bold green]\n"
+                f"    ├── [bold magenta]PostgreSQL Status:[/bold magenta] {new_in_db} New Job(s) to Scrape | {existing_in_db} Already in DB\n"
+                f"    ├── [bold cyan]Full-Time Jobs Branch:[/bold cyan] {len(full_time_branch)}\n"
+                f"    └── [bold yellow]Contract Jobs Branch:[/bold yellow] {len(contract_branch)}"
+                + (f" [dim](+ {len(other_branch)} other: intern/part-time)[/dim]" if other_branch else "")
+            )
+
+            # Step 7: Scrape Job Details (Full JD, Tech Role, Location, Content Hash)
+            all_classified = full_time_branch + contract_branch + other_branch
+            processed_jobs: List[ProcessedJob] = []
+
+            console.print(
+                f"  [bold green]▶ Step 7 (Scrape Job Details):[/bold green] Fetching full JD descriptions, deducing Tech Roles & attributes..."
+            )
+
+            for raw_job, tech_kw, emp_type in all_classified:
+                # Update session employment counts
+                if emp_type == "FULL_TIME":
+                    self.session_stats["full_time_jobs"] += 1
+                elif emp_type == "CONTRACT":
+                    self.session_stats["contract_jobs"] += 1
+                elif emp_type == "PART_TIME":
+                    self.session_stats["part_time_jobs"] += 1
+                elif emp_type == "INTERNSHIP":
+                    self.session_stats["internship_jobs"] += 1
+
+                # If raw_description is very short, fetch deep page content
+                desc = raw_job.raw_description
+                if len(desc) < 80 and raw_job.job_url and raw_job.job_url.startswith("http"):
+                    deep_desc = BaseScraper.fetch_job_page_details(raw_job.job_url)
+                    if deep_desc:
+                        desc = deep_desc
+                        raw_job.raw_description = deep_desc
+
+                # Deduce Tech Role from Job Description
+                tech_role = JDAnalyzer.deduce_tech_role_from_jd(
+                    title=raw_job.title, description=desc
+                )
+                roles_map = self.session_stats["tech_roles_breakdown"]
+                roles_map[tech_role] = roles_map.get(tech_role, 0) + 1
+
                 processed_job = self.scrape_job_details(
                     company_id=company.id,
                     source_id=source.id,
                     raw_job=raw_job,
                     employment_type=emp_type,
+                    tech_role=tech_role,
                     tech_keywords=tech_kw,
                 )
                 processed_jobs.append(processed_job)
 
             # Step 8: Store Jobs in Database
+            console.print(
+                f"  [bold green]▶ Step 8 (Store Jobs in Database):[/bold green] Storing {len(processed_jobs)} jobs in PostgreSQL..."
+            )
             self.store_jobs_in_database(processed_jobs, stats)
 
             stats.status = "SUCCESS"
@@ -187,7 +330,7 @@ class ScraperAgent:
             )
 
         except Exception as exc:
-            logger.error(f"Error scraping source {source.id} ({source.source_url}): {exc}", exc_info=True)
+            logger.error(f"Error processing jobs for {company.name} ({source.source_url}): {exc}", exc_info=True)
             stats.status = "FAILED"
             stats.error_message = str(exc)
             self.repo.update_job_source_status(source.id, success=False)
@@ -199,7 +342,7 @@ class ScraperAgent:
 
     # Step 4: Identify Posted Jobs
     def identify_posted_jobs(self, source: JobSource) -> List[RawJobPost]:
-        """Fetches raw job listings from the company's job source using appropriate scraper."""
+        """Fetches raw job listings from the company's career page using Playwright."""
         scraper = get_scraper_for_type(source.scraper_type)
         return scraper.fetch_jobs(source.source_url)
 
@@ -212,7 +355,6 @@ class ScraperAgent:
         Returns (list_of_accepted_jobs_with_matched_keywords, filtered_out_count).
         """
         if not self.filter_tech_only:
-            # If tech filter disabled, pass all jobs
             return [(j, ["all"]) for j in raw_jobs], 0
 
         accepted: List[Tuple[RawJobPost, List[str]]] = []
@@ -231,13 +373,11 @@ class ScraperAgent:
 
     # Step 6: Classify Employment Type
     def classify_employment_type(self, raw_job: RawJobPost) -> str:
-        """
-        Classifies whether the job is 'FULL_TIME' or 'CONTRACT'.
-        """
-        return classify_employment_type(
+        """Classifies whether the job is 'FULL_TIME' or 'CONTRACT'."""
+        return JDAnalyzer.deduce_employment_type_from_jd(
             title=raw_job.title,
             description=raw_job.raw_description,
-            source_metadata=raw_job.metadata,
+            metadata=raw_job.metadata,
         )
 
     # Step 7: Scrape Job Details
@@ -247,11 +387,12 @@ class ScraperAgent:
         source_id: int,
         raw_job: RawJobPost,
         employment_type: str,
+        tech_role: str,
         tech_keywords: List[str],
     ) -> ProcessedJob:
         """
         Cleans and extracts full job attributes, normalizes geography & remote type,
-        and computes SHA-256 content hash.
+        assigns deduced tech role, and computes SHA-256 content hash.
         """
         city, state, country, remote_type = parse_location(
             raw_location=raw_job.raw_location,
@@ -278,6 +419,7 @@ class ScraperAgent:
             country=country,
             remote_type=remote_type,
             employment_type=employment_type,
+            tech_role=tech_role,
             posted_at=raw_job.posted_at,
             source_updated_at=raw_job.source_updated_at,
             job_url=raw_job.job_url,
@@ -314,15 +456,32 @@ class ScraperAgent:
         table.add_row("Companies Processed", str(self.session_stats["companies_processed"]))
         table.add_row("Sources Scraped", str(self.session_stats["sources_scraped"]))
         table.add_row("Total Raw Jobs Found", str(self.session_stats["jobs_found"]))
+        table.add_row("Fresh Postings (Prev + Current Month)", str(self.session_stats["fresh_jobs_passed"]))
+        table.add_row("Stale Jobs Skipped", str(self.session_stats["stale_jobs_skipped"]))
         table.add_row("Tech Jobs Filtered", str(self.session_stats["tech_jobs_passed"]))
+        table.add_row("DB Status Check - New Jobs", str(self.session_stats["db_new_jobs"]))
+        table.add_row("DB Status Check - Existing Jobs", str(self.session_stats["db_existing_jobs"]))
         table.add_row("  - Full-Time Jobs", str(self.session_stats["full_time_jobs"]))
         table.add_row("  - Contract Jobs", str(self.session_stats["contract_jobs"]))
-        table.add_row("New Jobs Stored", str(self.session_stats["new_stored"]))
-        table.add_row("Updated Jobs Stored", str(self.session_stats["updated_stored"]))
+        table.add_row("  - Part-Time Jobs", str(self.session_stats["part_time_jobs"]))
+        table.add_row("  - Internship Jobs", str(self.session_stats["internship_jobs"]))
+        table.add_row("New Jobs Stored in DB", str(self.session_stats["new_stored"]))
+        table.add_row("Updated Jobs Stored in DB", str(self.session_stats["updated_stored"]))
         table.add_row("Duplicate / Unchanged Jobs", str(self.session_stats["duplicates_stored"]))
         table.add_row("Invalid Skipped", str(self.session_stats["invalid_skipped"]))
 
         console.print("\n")
         console.print(table)
+
+        # Print Tech Roles Breakdown Table
+        roles_data = self.session_stats.get("tech_roles_breakdown", {})
+        if roles_data:
+            role_table = Table(title="Top Tech Roles Deduced from JD", border_style="cyan")
+            role_table.add_column("Deduced Tech Role", style="yellow")
+            role_table.add_column("Count", style="bold green", justify="right")
+            for role, cnt in sorted(roles_data.items(), key=lambda x: x[1], reverse=True)[:10]:
+                role_table.add_row(role, str(cnt))
+            console.print(role_table)
+
         console.print("[bold green]✔ Scraper Agent Execution Completed.[/bold green]\n")
         return self.session_stats

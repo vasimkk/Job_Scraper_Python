@@ -56,13 +56,14 @@ class ProcessedJob:
     state: Optional[str]
     country: Optional[str]
     remote_type: str  # 'REMOTE', 'HYBRID', 'ON_SITE', 'UNKNOWN'
-    employment_type: str  # 'FULL_TIME', 'CONTRACT', etc.
+    employment_type: str  # 'FULL_TIME', 'CONTRACT', 'PART_TIME', 'INTERNSHIP'
     posted_at: Optional[datetime]
     source_updated_at: Optional[datetime]
     job_url: str
     application_url: Optional[str]
     content_hash: str
     is_tech: bool
+    tech_role: Optional[str] = "Software Engineer"
     tech_keywords: List[str] = field(default_factory=list)
     status: str = "OPEN"
 
