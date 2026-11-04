@@ -15,22 +15,42 @@ class TestIntegration(unittest.TestCase):
 
     def test_repository_industries_and_companies(self):
         repo = JobRepository()
+        repo.get_or_create_company(
+            name="TestCompanyGitLab",
+            domain="gitlab.com",
+            career_url="https://about.gitlab.com/jobs",
+            industry="IT, Software & Technology",
+        )
+        repo.get_or_create_company(
+            name="TestCompanyCoinbase",
+            domain="coinbase.com",
+            career_url="https://coinbase.com/careers",
+            industry="Finance & Banking",
+        )
         industries = repo.get_distinct_industries()
-        self.assertIn("Information Technology", industries)
-        self.assertIn("Finance", industries)
+        self.assertIn("IT, Software & Technology", industries)
+        self.assertIn("Finance & Banking", industries)
 
-        tech_companies = repo.get_companies_by_industry("Information Technology")
+        tech_companies = repo.get_companies_by_industry("IT, Software & Technology")
         self.assertTrue(len(tech_companies) > 0)
-        self.assertTrue(any(c.name == "GitLab" for c in tech_companies))
+        self.assertTrue(any(c.name == "TestCompanyGitLab" for c in tech_companies))
 
     def test_job_upsert_lifecycle(self):
         repo = JobRepository()
-        company = repo.get_company_by_name("GitLab")
+        company = repo.get_or_create_company(
+            name="TestCompanyGitLab",
+            domain="gitlab.com",
+            career_url="https://about.gitlab.com/jobs",
+            industry="IT, Software & Technology",
+        )
         self.assertIsNotNone(company)
 
-        sources = repo.get_active_sources_for_company(company.id)
-        self.assertTrue(len(sources) > 0)
-        source = sources[0]
+        source = repo.get_or_create_job_source(
+            company_id=company.id,
+            source_url="https://about.gitlab.com/jobs",
+            scraper_type="playwright",
+        )
+        self.assertIsNotNone(source)
 
         ext_id = "test_unit_job_9999"
         title = "Staff Python Platform Engineer"

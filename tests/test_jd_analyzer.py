@@ -11,31 +11,45 @@ class TestJDAnalyzer(unittest.TestCase):
         The engineer will ensure HIPAA compliance and handle sensitive patient clinical data.
         """
         ind = JDAnalyzer.deduce_industry_from_jd("Software Engineer", health_jd)
-        self.assertEqual(ind, "Healthcare & Life Sciences")
+        self.assertEqual(ind, "Healthcare")
 
-        # Finance JD
+        # Finance & Banking JD
         fin_jd = """
         Our fintech platform processes millions in daily credit card payments and crypto transactions.
         You will build secure banking ledgers and trading reconciliation pipelines.
         """
         ind = JDAnalyzer.deduce_industry_from_jd("Senior Engineer", fin_jd)
-        self.assertEqual(ind, "Finance & FinTech")
+        self.assertEqual(ind, "Finance & Banking")
 
-        # Defense JD
+        # Aerospace & Defense JD
         defense_jd = """
         Developing autonomous UAV and drone systems for national security.
         Requires active DoD Secret security clearance and avionics radar integration.
         """
         ind = JDAnalyzer.deduce_industry_from_jd("Systems Architect", defense_jd)
-        self.assertEqual(ind, "Defense & Aerospace")
+        self.assertEqual(ind, "Aerospace & Defense")
 
-        # Energy JD
+        # Solar, Energy & Utilities JD
         energy_jd = """
         Join our clean energy mission! Building EV charging networks and smart power grid batteries
         to accelerate solar and renewable decarbonization.
         """
         ind = JDAnalyzer.deduce_industry_from_jd("Firmware Lead", energy_jd)
-        self.assertEqual(ind, "Energy & CleanTech")
+        self.assertEqual(ind, "Solar, Energy & Utilities")
+
+        # Insurance JD
+        insur_jd = """
+        Our insurtech platform automates policyholder claims and underwriting actuarial models.
+        """
+        ind = JDAnalyzer.deduce_industry_from_jd("Software Engineer", insur_jd)
+        self.assertEqual(ind, "Insurance")
+
+        # Pharma & Biotechnology JD
+        pharma_jd = """
+        Working on mRNA therapeutics, oncology genomics, and FDA approved drug discovery assays.
+        """
+        ind = JDAnalyzer.deduce_industry_from_jd("Bioinformatics Developer", pharma_jd)
+        self.assertEqual(ind, "Pharma & Biotechnology")
 
     def test_deduce_tech_role(self):
         # AI/ML

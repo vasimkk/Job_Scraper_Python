@@ -17,7 +17,11 @@ from rich.panel import Panel
 
 from scraper_agent.config import SCRAPER_CONFIG
 from scraper_agent.db.repository import JobRepository
-from scraper_agent.discovery.company_finder import DynamicJobDiscovery
+from scraper_agent.discovery.company_finder import (
+    DynamicJobDiscovery,
+    TARGET_INDUSTRIES,
+    normalize_industry_name,
+)
 from scraper_agent.models.job import Company, JobSource, RawJobPost, ProcessedJob, ScrapeRunStats
 from scraper_agent.classifiers.tech_filter import is_technology_job
 from scraper_agent.classifiers.location_parser import parse_location
@@ -33,14 +37,7 @@ from scraper_agent.scrapers.registry import get_scraper_for_type
 logger = logging.getLogger(__name__)
 console = Console(highlight=False)
 
-DEFAULT_INDUSTRIES = [
-    "Information Technology",
-    "Healthcare",
-    "Finance",
-    "Energy",
-    "Defense",
-    "Cybersecurity",
-]
+DEFAULT_INDUSTRIES = TARGET_INDUSTRIES
 
 
 class ScraperAgent:
@@ -150,12 +147,22 @@ class ScraperAgent:
     def identify_industry(self, requested_industry: Optional[str] = None) -> List[str]:
         """
         Determines target industries for job collection.
-        If None or 'ALL', returns the list of all configured major industries.
-        Otherwise returns a single-item list with the specified industry.
+        If None or 'ALL', returns all 7 target industries:
+          1. IT, Software & Technology
+          2. Healthcare
+          3. Finance & Banking
+          4. Insurance
+          5. Solar, Energy & Utilities
+          6. Aerospace & Defense
+          7. Pharma & Biotechnology
+        Otherwise normalizes and returns a single-item list with the specified industry.
         """
-        if requested_industry and requested_industry.strip() and requested_industry.strip().upper() != "ALL":
-            return [requested_industry.strip()]
-        return DEFAULT_INDUSTRIES
+        if not requested_industry or requested_industry.strip().upper() in ["ALL", ""]:
+            return DEFAULT_INDUSTRIES
+        normalized = normalize_industry_name(requested_industry)
+        if normalized == "ALL":
+            return DEFAULT_INDUSTRIES
+        return [normalized]
 
     # Step 3: Find Companies in Industry
     def find_companies_in_industry(

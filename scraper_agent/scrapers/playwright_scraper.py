@@ -49,36 +49,47 @@ class PlaywrightCareerScraper(BaseScraper):
                 context = browser.new_context(
                     user_agent=SCRAPER_CONFIG.user_agent,
                     viewport={"width": 1280, "height": 800},
+                    ignore_https_errors=True,
                 )
                 page = context.new_page()
 
                 try:
-                    # Navigate to career page
-                    page.goto(career_url, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(2500)
+                    # Navigate to career page with sensible timeout
+                    page.goto(career_url, wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(2000)
 
-                    # Trigger lazy-load / scroll
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
-                    page.wait_for_timeout(1000)
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    page.wait_for_timeout(1500)
+                    # Trigger lazy-load / scroll safely
+                    try:
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                        page.wait_for_timeout(800)
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        page.wait_for_timeout(1200)
+                    except Exception:
+                        pass
 
                     # Check for embedded ATS iframes (e.g. embedded Greenhouse or Lever)
-                    for frame in page.frames:
-                        if "greenhouse.io" in frame.url or "lever.co" in frame.url or "ashbyhq.com" in frame.url:
-                            logger.info(f"Detected embedded ATS iframe: {frame.url}")
-                            # Extract jobs directly from the frame
-                            job_posts.extend(self._extract_jobs_from_frame(frame, career_url))
+                    try:
+                        for frame in page.frames:
+                            if "greenhouse.io" in frame.url or "lever.co" in frame.url or "ashbyhq.com" in frame.url:
+                                logger.info(f"Detected embedded ATS iframe: {frame.url}")
+                                job_posts.extend(self._extract_jobs_from_frame(frame, career_url))
+                    except Exception:
+                        pass
 
                     # If not extracted from iframe, extract from main DOM
                     if not job_posts:
                         job_posts = self._extract_jobs_from_page(page, career_url, max_jobs)
 
+                except Exception as nav_exc:
+                    logger.warning(f"Unable to scrape career page {career_url}: {nav_exc}")
                 finally:
-                    browser.close()
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
 
         except Exception as exc:
-            logger.error(f"Playwright error while scraping {career_url}: {exc}", exc_info=True)
+            logger.warning(f"Playwright error initializing for {career_url}: {exc}")
 
         logger.info(f"Playwright extracted {len(job_posts)} jobs from {career_url}")
         return job_posts

@@ -35,14 +35,22 @@ def initialize_schema() -> None:
 
 
 def seed_database() -> None:
-    """Reads and executes seed_data.sql to populate initial companies and ATS job sources."""
+    """Reads and executes seed_data.sql if present and non-empty."""
     seed_file = SQL_DIR / "seed_data.sql"
     if not seed_file.exists():
-        raise FileNotFoundError(f"Seed file not found at: {seed_file}")
+        return
 
-    sql_content = seed_file.read_text(encoding="utf-8")
+    sql_content = seed_file.read_text(encoding="utf-8").strip()
+    non_comment_lines = [
+        line.strip() for line in sql_content.splitlines()
+        if line.strip() and not line.strip().startswith("--")
+    ]
+    if not non_comment_lines:
+        # File is empty or comments only; discovery runs 100% dynamically
+        logger.info("seed_data.sql is empty. Companies will be discovered 100% dynamically.")
+        return
+
     logger.info("Applying seed companies and job sources...")
-
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql_content)

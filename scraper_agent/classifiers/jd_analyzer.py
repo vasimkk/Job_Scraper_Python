@@ -1,50 +1,52 @@
 import re
 from typing import Dict, Any, Optional, Tuple
 
-# Comprehensive Industry Signature Vocabularies
+# Comprehensive Industry Signature Vocabularies aligned with the 7 Target Industries:
 INDUSTRY_SIGNATURES = {
-    "Healthcare & Life Sciences": [
-        r"\bclinical\b", r"\bpatient\b", r"\bhospital\b", r"\bhipaa\b",
-        r"\bhealthcare\b", r"\bpharma\b", r"\bbiotech\b", r"\btherapeutics\b",
-        r"\bmedical\b", r"\bmedicine\b", r"\behr\b", r"\bemr\b",
-        r"\btelehealth\b", r"\bdoctor\b", r"\bphysician\b", r"\boncology\b",
-        r"\bgenomics\b", r"\bfda\b", r"\bcare\b", r"\bdiagnostic\b",
+    "IT, Software & Technology": [
+        r"\bsoftware\b", r"\bsaas\b", r"\bb2b\b", r"\bdeveloper tools\b",
+        r"\bcloud infrastructure\b", r"\bapi\b", r"\bplatform\b", r"\bdevops\b",
+        r"\bfrontend\b", r"\bbackend\b", r"\bfullstack\b", r"\bcybersecurity\b",
+        r"\binfosec\b", r"\bcloud\b", r"\bkubernetes\b", r"\bmicroservices\b",
     ],
-    "Finance & FinTech": [
+    "Healthcare": [
+        r"\bclinical\b", r"\bpatient\b", r"\bhospital\b", r"\bhipaa\b",
+        r"\bhealthcare\b", r"\bmedical\b", r"\bmedicine\b", r"\behr\b",
+        r"\bemr\b", r"\btelehealth\b", r"\bdoctor\b", r"\bphysician\b",
+        r"\bhealth tech\b", r"\bhealthtech\b", r"\bcare\b", r"\bdiagnostic\b",
+    ],
+    "Finance & Banking": [
         r"\bfintech\b", r"\bbanking\b", r"\bpayments?\b", r"\bledger\b",
         r"\bcrypto\b", r"\bblockchain\b", r"\bwallet\b", r"\btrading\b",
         r"\bsec\b", r"\bcompliance\b", r"\bcredit\b", r"\bloan\b",
-        r"\bequity\b", r"\bportfolio\b", r"\bhedge fund\b", r"\binsurance\b",
-        r"\bunderwriting\b", r"\bwealth management\b", r"\bsecurities\b",
-        r"\btransactions?\b", r"\bfinancial\b",
+        r"\bequity\b", r"\bportfolio\b", r"\bhedge fund\b", r"\bwealth management\b",
+        r"\bsecurities\b", r"\btransactions?\b", r"\bfinancial\b", r"\bbank\b",
     ],
-    "Defense & Aerospace": [
+    "Insurance": [
+        r"\binsurance\b", r"\binsurtech\b", r"\bpolicyholder\b", r"\bunderwriting\b",
+        r"\bunderwriter\b", r"\bactuarial\b", r"\bactuary\b", r"\bclaims\b",
+        r"\bpremium\b", r"\breinsurance\b", r"\bcoverage\b", r"\bpolicy\b",
+        r"\blife insurance\b", r"\bproperty\b", r"\bcasualty\b",
+    ],
+    "Solar, Energy & Utilities": [
+        r"\benergy\b", r"\bsolar\b", r"\bcleantech\b", r"\bclean tech\b",
+        r"\brenewable\b", r"\bbatter(y|ies)\b", r"\bpower grid\b",
+        r"\bev charging\b", r"\bkilowatt\b", r"\bdecarbonization\b",
+        r"\bclean energy\b", r"\belectricit(y|ies)\b", r"\bwind turbine\b",
+        r"\bclimate tech\b", r"\butilities\b", r"\bpower generation\b", r"\bgrid\b",
+    ],
+    "Aerospace & Defense": [
         r"\bdefense\b", r"\baerospace\b", r"\bavionics\b", r"\bradar\b",
         r"\bmissiles?\b", r"\bsatellites?\b", r"\bsecurity clearance\b",
         r"\bsecret clearance\b", r"\bts/sci\b", r"\buav\b", r"\bdrones?\b",
         r"\bdod\b", r"\bnational security\b", r"\bweapon\b", r"\bunmanned\b",
         r"\bspacecraft\b", r"\bairforce\b", r"\bnavy\b", r"\bmilitary\b",
     ],
-    "Energy & CleanTech": [
-        r"\benergy\b", r"\bsolar\b", r"\bcleantech\b", r"\bclean tech\b",
-        r"\brenewable\b", r"\bbatter(y|ies)\b", r"\bpower grid\b",
-        r"\bev charging\b", r"\bkilowatt\b", r"\bdecarbonization\b",
-        r"\bclean energy\b", r"\belectricit(y|ies)\b", r"\bwind turbine\b",
-        r"\bclimate tech\b", r"\butilities\b", r"\bpower generation\b",
-    ],
-    "E-Commerce & Retail": [
-        r"\be-commerce\b", r"\becommerce\b", r"\bretail\b", r"\bcheckout\b",
-        r"\bcart\b", r"\bmerchandising\b", r"\bfulfillment\b", r"\bsupply chain\b",
-        r"\bwarehouse\b", r"\bshopify\b", r"\bstorefront\b", r"\bmarketplace\b",
-    ],
-    "Cybersecurity": [
-        r"\bcybersecurity\b", r"\binfosec\b", r"\bappsec\b", r"\bpenetration testing\b",
-        r"\bsoc\b", r"\bvulnerability\b", r"\bthreat detection\b", r"\bzero trust\b",
-        r"\bincident response\b", r"\bmalware\b", r"\bfirewall\b",
-    ],
-    "Information Technology": [
-        r"\bsoftware\b", r"\bsaas\b", r"\bb2b\b", r"\bdeveloper tools\b",
-        r"\bcloud infrastructure\b", r"\bapi\b", r"\bplatform\b",
+    "Pharma & Biotechnology": [
+        r"\bpharma\b", r"\bpharmaceuticals?\b", r"\bbiotech\b", r"\bbiotechnology\b",
+        r"\btherapeutics\b", r"\boncology\b", r"\bgenomics\b", r"\bfda\b",
+        r"\bdrug discovery\b", r"\bclinical trials?\b", r"\bassays?\b", r"\bmolecular\b",
+        r"\bbiolog(y|ical)\b", r"\bbiochemistry\b", r"\bmrna\b", r"\bvaccines?\b",
     ],
 }
 
@@ -225,7 +227,7 @@ class JDAnalyzer:
         if fallback_industry and fallback_industry.strip() and fallback_industry.upper() != "ALL":
             return fallback_industry.strip()
 
-        return best_industry if highest_score > 0 else "Information Technology"
+        return best_industry if highest_score > 0 else "IT, Software & Technology"
 
     @staticmethod
     def deduce_tech_role_from_jd(title: str, description: str) -> str:

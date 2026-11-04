@@ -18,6 +18,7 @@ from rich.prompt import Prompt
 from scraper_agent.db.schema_manager import initialize_schema, seed_database
 from scraper_agent.db.connection import test_connection
 from scraper_agent.db.repository import JobRepository
+from scraper_agent.discovery.company_finder import TARGET_INDUSTRIES, normalize_industry_name
 from scraper_agent.agent.scraper_agent import ScraperAgent
 from scraper_agent.classifiers.date_filter import format_freshness_window_description
 
@@ -72,14 +73,11 @@ def print_database_stats():
 
 def run_interactive_mode(enforce_date_window: bool = True):
     """Interactive CLI menu to choose industry and run dynamic scraping."""
-    repo = JobRepository()
-    industries = repo.get_distinct_industries()
-
     console.print("\n[bold cyan]Select Target Industry for Dynamic Discovery:[/bold cyan]")
-    console.print("  [bold green]0.[/bold green] ALL Industries (Broad Dynamic Discovery)")
-    for idx, ind in enumerate(industries, 1):
+    console.print("  [bold green]0.[/bold green] ALL 7 Target Industries")
+    for idx, ind in enumerate(TARGET_INDUSTRIES, 1):
         console.print(f"  [bold green]{idx}.[/bold green] {ind}")
-    console.print("  [bold green]C.[/bold green] Custom Industry (Type your own, e.g. 'Cybersecurity', 'FinTech')")
+    console.print("  [bold green]C.[/bold green] Custom Industry (Type your own, e.g. 'FinTech', 'E-Commerce')")
 
     choice = Prompt.ask(
         "Enter selection (number, name, or custom industry)",
@@ -88,15 +86,15 @@ def run_interactive_mode(enforce_date_window: bool = True):
 
     selected_industry = "ALL"
     if choice.upper() == "C":
-        selected_industry = Prompt.ask("Enter custom industry name", default="Information Technology")
+        selected_industry = Prompt.ask("Enter custom industry name", default="IT, Software & Technology")
     elif choice.isdigit():
         choice_idx = int(choice)
-        if 1 <= choice_idx <= len(industries):
-            selected_industry = industries[choice_idx - 1]
-    elif choice in industries:
+        if 1 <= choice_idx <= len(TARGET_INDUSTRIES):
+            selected_industry = TARGET_INDUSTRIES[choice_idx - 1]
+    elif choice in TARGET_INDUSTRIES:
         selected_industry = choice
     elif choice.strip():
-        selected_industry = choice.strip()
+        selected_industry = normalize_industry_name(choice.strip())
 
     agent = ScraperAgent(enforce_date_window=enforce_date_window)
     agent.start(target_industry=selected_industry, dynamic_discovery=True)
