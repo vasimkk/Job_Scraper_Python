@@ -29,6 +29,9 @@ def is_valid_job_url(job_url: str) -> bool:
     if not job_url or not job_url.startswith("http"):
         return False
     u = job_url.lower()
+    # Reject malformed greenhouse company URLs (e.g. boards.greenhouse.io/company/...)
+    if "boards.greenhouse.io/company/" in u:
+        return False
     for pat in DISALLOWED_URL_PATTERNS:
         if re.search(pat, u):
             return False
@@ -48,6 +51,31 @@ def is_valid_job_url(job_url: str) -> bool:
     return False
 
 
+def normalize_job_url(href: str, base_url: str) -> str:
+    """
+    Normalizes relative job URLs against base URL.
+    Fixes malformed relative paths like '/company/careers/...' that accidentally join to boards.greenhouse.io.
+    """
+    if not href:
+        return base_url
+
+    # If href is /company/careers/... and base_url is a Greenhouse board
+    if "boards.greenhouse.io/" in base_url and ("/company/careers/" in href or "/company/" in href):
+        m = re.search(r"[-=](\d{6,})", href)
+        board_m = re.search(r"boards\.greenhouse\.io/([^/?#]+)", base_url)
+        if m and board_m and board_m.group(1) != "company":
+            return f"https://boards.greenhouse.io/{board_m.group(1)}/jobs/{m.group(1)}"
+
+    # If href already has boards.greenhouse.io/company/
+    if "boards.greenhouse.io/company/" in href:
+        m = re.search(r"[-=](\d{6,})", href)
+        board_m = re.search(r"boards\.greenhouse\.io/([^/?#]+)", base_url)
+        if m and board_m and board_m.group(1) != "company":
+            return f"https://boards.greenhouse.io/{board_m.group(1)}/jobs/{m.group(1)}"
+
+    return urljoin(base_url, href)
+
+
 class PlaywrightCareerScraper(BaseScraper):
     """
     Automated Playwright browser scraper for real company career pages.
@@ -59,16 +87,62 @@ class PlaywrightCareerScraper(BaseScraper):
         super().__init__()
         self.headless = headless
 
+    def _fetch_greenhouse_api_jobs(self, slug: str, max_jobs: int = 120) -> List[RawJobPost]:
+        """Directly fetches jobs from Greenhouse's official public REST API when HTML is challenged or blocked."""
+        import urllib.request
+        import json
+        posts = []
+        try:
+            api_url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+            req = urllib.request.Request(api_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                raw_list = data.get("jobs", [])
+                for item in raw_list[:max_jobs]:
+                    jid = str(item.get("id"))
+                    title = (item.get("title") or "").strip()
+                    loc = item.get("location", {}).get("name", "") if isinstance(item.get("location"), dict) else ""
+                    # Use official absolute_url from API or fallback to canonical greenhouse URL
+                    raw_abs_url = item.get("absolute_url") or ""
+                    if raw_abs_url and "boards.greenhouse.io/company/" not in raw_abs_url:
+                        job_url = raw_abs_url
+                    else:
+                        job_url = f"https://boards.greenhouse.io/{slug}/jobs/{jid}"
+                    posts.append(
+                        RawJobPost(
+                            external_job_id=f"gh_{slug}_{jid}",
+                            title=title,
+                            raw_description=title,
+                            raw_location=loc,
+                            job_url=job_url,
+                            application_url=job_url,
+                            posted_at=datetime.now(timezone.utc),
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"Greenhouse API fallback failed for {slug}: {e}")
+        return posts
+
     def fetch_jobs(self, source_url: str) -> List[RawJobPost]:
         """Navigates to the real company career URL and extracts live job postings."""
-        return self.scrape_career_page(source_url)
+        return self.scrape_career_page(source_url, max_jobs=120)
 
     def scrape_career_page(
-        self, career_url: str, max_jobs: int = 50
+        self, career_url: str, max_jobs: int = 120
     ) -> List[RawJobPost]:
         """
         Launches Playwright headless Chrome to render and extract jobs from the career page.
         """
+        # Fast, robust Greenhouse API check (bypasses Cloudflare/HTTP 403 on greenhouse boards)
+        if "boards.greenhouse.io/" in career_url:
+            board_m = re.search(r"boards\.greenhouse\.io/([^/?#]+)", career_url)
+            if board_m and board_m.group(1) != "company":
+                slug = board_m.group(1)
+                api_jobs = self._fetch_greenhouse_api_jobs(slug, max_jobs=max_jobs)
+                if api_jobs:
+                    logger.info(f"Greenhouse API returned {len(api_jobs)} active jobs for {slug}")
+                    return api_jobs
+
         logger.info(f"Opening career page with Playwright: {career_url}")
         job_posts: List[RawJobPost] = []
 
@@ -245,7 +319,7 @@ class PlaywrightCareerScraper(BaseScraper):
                     continue
 
                 href = elem.get_attribute("href") or ""
-                job_url = urljoin(base_url, href) if href else base_url
+                job_url = normalize_job_url(href, base_url) if href else base_url
                 if not is_valid_job_url(job_url):
                     continue
                 if job_url in seen_urls:
@@ -306,8 +380,8 @@ class PlaywrightCareerScraper(BaseScraper):
                             title=t,
                             raw_description=t,
                             raw_location="",
-                            job_url=urljoin(base_url, href),
-                            application_url=urljoin(base_url, href),
+                            job_url=normalize_job_url(href, base_url),
+                            application_url=normalize_job_url(href, base_url),
                             posted_at=datetime.now(timezone.utc),
                         )
                     )
@@ -325,7 +399,7 @@ class PlaywrightCareerScraper(BaseScraper):
             if len(posts) >= max_jobs:
                 break
             href = a["href"]
-            full_url = urljoin(base_url, href)
+            full_url = normalize_job_url(href, base_url)
             if not is_valid_job_url(full_url):
                 continue
             title = a.get_text().strip()

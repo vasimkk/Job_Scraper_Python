@@ -57,21 +57,43 @@ class BaseScraper(ABC):
         cleaned = re.sub(r"\n\s*\n+", "\n\n", text).strip()
         return cleaned
 
+    DEAD_JOB_INDICATORS = [
+        "sorry, but we can't find that page",
+        "can't find that page",
+        "page not found",
+        "404 not found",
+        "this job is no longer available",
+        "job is no longer available",
+        "posting has expired",
+        "this position has been filled",
+        "no longer accepting applications",
+    ]
+
     @staticmethod
-    def fetch_job_deep_info(job_url: str) -> dict:
+    def is_url_active(job_url: str) -> bool:
         """
-        Deep-fetches job description, location, title, and employment metadata from the job page.
-        Returns a dict: {'description': Optional[str], 'location': Optional[str], 'title': Optional[str], 'employment_type': Optional[str]}
+        Validates that a job URL is live, accessible, and not a 404 or expired posting.
+        Returns False if server returns 4xx/5xx, is malformed, or page contains dead-job error text.
         """
-        import json
-        result = {
-            "description": None,
-            "location": None,
-            "title": None,
-            "employment_type": None,
-        }
         if not job_url or not job_url.startswith("http"):
-            return result
+            return False
+        # Malformed greenhouse company URLs are immediately invalid
+        if "boards.greenhouse.io/company/" in job_url:
+            return False
+
+        # Fast Greenhouse API check
+        if "greenhouse.io/" in job_url:
+            gh_m = re.search(r"greenhouse\.io/(?:job-boards/)?([a-zA-Z0-9_-]+)/jobs/(\d+)", job_url)
+            if gh_m:
+                slug, jid = gh_m.group(1), gh_m.group(2)
+                if slug != "company":
+                    try:
+                        api_u = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{jid}"
+                        r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent}, timeout=5)
+                        return r.status_code == 200
+                    except Exception:
+                        return False
+
         try:
             resp = requests.get(
                 job_url,
@@ -79,9 +101,81 @@ class BaseScraper(ABC):
                     "User-Agent": SCRAPER_CONFIG.user_agent,
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
-                timeout=7,
+                timeout=SCRAPER_CONFIG.request_timeout,
+                allow_redirects=True,
+            )
+            if resp.status_code != 200:
+                return False
+            body_lower = resp.text.lower()
+            if any(ind in body_lower for ind in BaseScraper.DEAD_JOB_INDICATORS):
+                return False
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def fetch_job_deep_info(job_url: str) -> dict:
+        """
+        Deep-fetches job description, location, title, and employment metadata from the job page.
+        Returns a dict: {'description': Optional[str], 'location': Optional[str], 'title': Optional[str], 'employment_type': Optional[str], 'is_active': bool}
+        """
+        import json
+        result = {
+            "description": None,
+            "location": None,
+            "title": None,
+            "employment_type": None,
+            "is_active": False,
+        }
+        if not job_url or not job_url.startswith("http"):
+            return result
+        if "boards.greenhouse.io/company/" in job_url:
+            return result
+
+        # 1. Official Greenhouse API handler (instant, full JD, 100% active validation)
+        if "greenhouse.io/" in job_url:
+            gh_m = re.search(r"greenhouse\.io/(?:job-boards/)?([a-zA-Z0-9_-]+)/jobs/(\d+)", job_url)
+            if gh_m:
+                slug, jid = gh_m.group(1), gh_m.group(2)
+                if slug != "company":
+                    try:
+                        api_u = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{jid}"
+                        r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent}, timeout=5)
+                        if r.status_code == 200:
+                            data = r.json()
+                            result["is_active"] = True
+                            if data.get("title"):
+                                result["title"] = data["title"].strip()
+                            loc_data = data.get("location")
+                            if isinstance(loc_data, dict) and loc_data.get("name"):
+                                result["location"] = loc_data["name"].strip()
+                            content_html = data.get("content") or ""
+                            if content_html:
+                                result["description"] = BaseScraper.clean_html(content_html)
+                            return result
+                        elif r.status_code == 404:
+                            result["is_active"] = False
+                            return result
+                    except Exception:
+                        pass
+
+        try:
+            resp = requests.get(
+                job_url,
+                headers={
+                    "User-Agent": SCRAPER_CONFIG.user_agent,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                timeout=SCRAPER_CONFIG.request_timeout,
+                allow_redirects=True,
             )
             if resp.status_code == 200 and resp.text:
+                body_lower = resp.text.lower()
+                if any(ind in body_lower for ind in BaseScraper.DEAD_JOB_INDICATORS):
+                    result["is_active"] = False
+                    return result
+
+                result["is_active"] = True
                 soup = BeautifulSoup(resp.text, "html.parser")
 
                 # 1. Check schema.org JSON-LD
@@ -108,6 +202,10 @@ class BaseScraper(ABC):
                                             result["location"] = ", ".join(valid_locs)
                     except Exception:
                         pass
+
+                # Decompose navigation, headers, and footers so menus/international office links don't pollute JD text
+                for tag in soup(["header", "nav", "footer", "noscript", "svg"]):
+                    tag.decompose()
 
                 # 2. Extract Location if not found in JSON-LD
                 if not result["location"]:

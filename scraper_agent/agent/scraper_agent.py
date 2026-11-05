@@ -340,7 +340,18 @@ class ScraperAgent:
                 # Flow Step 7: Always fetch deep job details (full JD, full location, real title) from the job page
                 desc = raw_job.raw_description
                 if raw_job.job_url and raw_job.job_url.startswith("http"):
+                    # Malformed greenhouse /company/ check: immediately reject
+                    if "boards.greenhouse.io/company/" in raw_job.job_url:
+                        logger.warning(f"Rejecting malformed job URL: {raw_job.job_url}")
+                        continue
+
                     deep_info = BaseScraper.fetch_job_deep_info(raw_job.job_url)
+
+                    # USER REQUIREMENT: Store ONLY active and available URLs (reject 404, 'Sorry, but we can't find that page', expired)
+                    if not deep_info.get("is_active", True):
+                        logger.warning(f"Skipping inactive/404 job posting: {raw_job.title} ({raw_job.job_url})")
+                        continue
+
                     if deep_info.get("description") and len(deep_info["description"]) > len(desc):
                         desc = deep_info["description"]
                         raw_job.raw_description = desc
@@ -460,6 +471,10 @@ class ScraperAgent:
         assigns deduced tech role, and computes SHA-256 content hash.
         Returns None if job is not confirmed USA-based.
         """
+        # Reject malformed or inactive greenhouse URLs
+        if not raw_job.job_url or "boards.greenhouse.io/company/" in raw_job.job_url:
+            return None
+
         city, state, country, remote_type = parse_location(
             raw_location=raw_job.raw_location,
             title=raw_job.title,
