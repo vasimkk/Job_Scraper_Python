@@ -109,6 +109,22 @@ class PlaywrightCareerScraper(BaseScraper):
                     if not job_posts:
                         job_posts = self._extract_jobs_from_page(page, career_url, max_jobs)
 
+                    # If still 0 jobs, look for navigation subpage like "/open-roles", "Open Roles", "View Openings", or ATS link
+                    if not job_posts:
+                        subpage_link = self._find_openings_subpage(page, career_url)
+                        if subpage_link and subpage_link != career_url and not subpage_link.endswith(career_url):
+                            logger.info(f"Navigating to openings subpage: {subpage_link}")
+                            try:
+                                page.goto(subpage_link, wait_until="domcontentloaded", timeout=20000)
+                                page.wait_for_timeout(2500)
+                                page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                                page.wait_for_timeout(600)
+                                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                                page.wait_for_timeout(1000)
+                                job_posts = self._extract_jobs_from_page(page, subpage_link, max_jobs)
+                            except Exception as sub_exc:
+                                logger.warning(f"Error navigating to openings subpage {subpage_link}: {sub_exc}")
+
                 except Exception as nav_exc:
                     logger.warning(f"Unable to scrape career page {career_url}: {nav_exc}")
                 finally:
@@ -122,6 +138,32 @@ class PlaywrightCareerScraper(BaseScraper):
 
         logger.info(f"Playwright extracted {len(job_posts)} jobs from {career_url}")
         return job_posts
+
+    def _find_openings_subpage(self, page: Page, base_url: str) -> Optional[str]:
+        """Looks for links to open jobs, openings, or ATS boards on landing pages."""
+        try:
+            anchors = page.query_selector_all("a[href]")
+            for a in anchors:
+                txt = (a.inner_text() or "").strip().lower()
+                href = (a.get_attribute("href") or "").strip()
+                if not href or href.startswith("#") or href.startswith("javascript:"):
+                    continue
+                # Priority 1: direct ATS link
+                if any(ats in href for ats in ["greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "icims.com"]):
+                    return urljoin(base_url, href)
+                # Priority 2: explicit open roles / jobs button
+                if any(phrase in txt for phrase in [
+                    "open roles", "explore open roles", "view open roles", "open positions",
+                    "view open positions", "current openings", "search jobs", "view jobs",
+                    "all openings", "see all roles", "browse jobs", "job openings"
+                ]):
+                    return urljoin(base_url, href)
+                # Priority 3: clear openings path
+                if any(p in href.lower() for p in ["/open-roles", "/openings", "/jobs/search", "/careers/jobs"]):
+                    return urljoin(base_url, href)
+        except Exception:
+            pass
+        return None
 
     def _launch_browser(self, playwright_instance) -> Browser:
         """Launches installed Chrome or Edge using Playwright channels."""

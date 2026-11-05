@@ -1,7 +1,7 @@
 import unittest
 from scraper_agent.classifiers.tech_filter import is_technology_job
 from scraper_agent.classifiers.employment import classify_employment_type
-from scraper_agent.classifiers.location_parser import parse_location
+from scraper_agent.classifiers.location_parser import parse_location, is_usa_location
 
 
 class TestClassifiers(unittest.TestCase):
@@ -92,6 +92,50 @@ class TestClassifiers(unittest.TestCase):
         self.assertEqual(city, "San Francisco")
         self.assertEqual(state, "CA")
         self.assertEqual(country, "United States")
+
+        # International parsing
+        city, state, country, _ = parse_location("Bengaluru, India")
+        self.assertEqual(country, "India")
+        self.assertFalse(is_usa_location("Bengaluru, India"))
+
+        city, state, country, _ = parse_location("London, United Kingdom")
+        self.assertEqual(country, "United Kingdom")
+        self.assertFalse(is_usa_location("London, United Kingdom"))
+
+        city, state, country, _ = parse_location("Toronto, Canada")
+        self.assertEqual(country, "Canada")
+        self.assertFalse(is_usa_location("Toronto, Canada"))
+
+        # ATS patterns
+        city, state, country, _ = parse_location("US-CA-Campbell-254")
+        self.assertEqual(state, "CA")
+        self.assertEqual(country, "United States")
+        self.assertTrue(is_usa_location("US-CA-Campbell-254"))
+
+        city, state, country, _ = parse_location("IN-Karnataka-Bangalore")
+        self.assertEqual(country, "India")
+        self.assertFalse(is_usa_location("IN-Karnataka-Bangalore"))
+
+    def test_usa_location_filter(self):
+        # US Positive
+        self.assertTrue(is_usa_location("San Francisco, CA"))
+        self.assertTrue(is_usa_location("Austin, TX"))
+        self.assertTrue(is_usa_location("Remote (US)"))
+        self.assertTrue(is_usa_location("United States - Remote"))
+        self.assertTrue(is_usa_location("US-CA-Campbell-254"))
+        self.assertTrue(is_usa_location("Seattle, WA"))
+
+        # Non-US Negative
+        self.assertFalse(is_usa_location("Bengaluru, Karnataka, India"))
+        self.assertFalse(is_usa_location("London, England, United Kingdom"))
+        self.assertFalse(is_usa_location("Toronto, Ontario, Canada"))
+        self.assertFalse(is_usa_location("Paris, France"))
+        self.assertFalse(is_usa_location("Berlin, Germany"))
+        self.assertFalse(is_usa_location("Tokyo, Japan"))
+        self.assertFalse(is_usa_location("Sydney, Australia"))
+        self.assertFalse(is_usa_location("Singapore"))
+        self.assertFalse(is_usa_location("IN-HR-Gurugram-418"))
+        self.assertFalse(is_usa_location("Where are you applying from? Europe North America"))
 
 
 if __name__ == "__main__":

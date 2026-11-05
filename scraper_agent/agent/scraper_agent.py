@@ -24,7 +24,7 @@ from scraper_agent.discovery.company_finder import (
 )
 from scraper_agent.models.job import Company, JobSource, RawJobPost, ProcessedJob, ScrapeRunStats
 from scraper_agent.classifiers.tech_filter import is_technology_job
-from scraper_agent.classifiers.location_parser import parse_location
+from scraper_agent.classifiers.location_parser import parse_location, is_usa_location, detect_international_country
 from scraper_agent.classifiers.date_filter import (
     is_job_in_date_window,
     get_freshness_cutoff,
@@ -82,6 +82,7 @@ class ScraperAgent:
             "part_time_jobs": 0,
             "internship_jobs": 0,
             "tech_roles_breakdown": {},
+            "non_usa_jobs_skipped": 0,
             "new_stored": 0,
             "updated_stored": 0,
             "duplicates_stored": 0,
@@ -95,6 +96,8 @@ class ScraperAgent:
         target_company: Optional[str] = None,
         target_url: Optional[str] = None,
         dynamic_discovery: bool = True,
+        target_jobs: int = 0,
+        limit_per_industry: int = 0,
     ) -> Dict[str, Any]:
         """Entry point that initializes and executes the complete agent workflow."""
         console.print(
@@ -123,6 +126,12 @@ class ScraperAgent:
         )
 
         for industry in target_industries:
+            if target_jobs > 0:
+                summary = self.repo.get_dashboard_summary()
+                if summary["total_jobs"] >= target_jobs:
+                    console.print(f"\n[bold green]🎯 Target Goal Reached:[/bold green] {summary['total_jobs']} jobs stored in PostgreSQL!")
+                    return self.end()
+
             console.print(f"\n[bold green]▶ Step 2 (Identify Industry):[/bold green] Target Industry: [bold yellow]{industry}[/bold yellow]")
 
             # Step 3: Find Companies in Industry
@@ -137,7 +146,13 @@ class ScraperAgent:
                 console.print(f"  [dim]No companies found for industry '{industry}'. Proceeding...[/dim]")
                 continue
 
-            for company, source in companies_and_sources:
+            active_co_list = companies_and_sources[:limit_per_industry] if limit_per_industry > 0 else companies_and_sources
+            for company, source in active_co_list:
+                if target_jobs > 0:
+                    summary = self.repo.get_dashboard_summary()
+                    if summary["total_jobs"] >= target_jobs:
+                        console.print(f"\n[bold green]🎯 Target Goal Reached:[/bold green] {summary['total_jobs']} jobs stored in PostgreSQL!")
+                        return self.end()
                 self._process_company(company, source)
 
         # Step 9: End
@@ -245,6 +260,33 @@ class ScraperAgent:
                 self.repo.update_job_source_status(source.id, success=True)
                 return
 
+            # USA Location Pre-Filter: exclude obvious international jobs early (India, UK, Canada, EMEA, etc.)
+            usa_candidates: List[Tuple[RawJobPost, List[str]]] = []
+            intl_early_skipped = 0
+            for job, kw in tech_jobs:
+                raw_loc = job.raw_location or ""
+                int_check = detect_international_country(f"{raw_loc} {job.title}")
+                if int_check and not any(
+                    us_marker in raw_loc.lower()
+                    for us_marker in ["united states", "usa", "u.s.", "california", "texas", "new york", "washington"]
+                ):
+                    intl_early_skipped += 1
+                else:
+                    usa_candidates.append((job, kw))
+
+            if intl_early_skipped:
+                self.session_stats["non_usa_jobs_skipped"] += intl_early_skipped
+                console.print(
+                    f"  [bold yellow]🇺🇸 USA Pre-Filter:[/bold yellow] Skipped [dim]{intl_early_skipped} overseas/international job(s) (Bengaluru, London, Canada, etc.)[/dim]."
+                )
+
+            tech_jobs = usa_candidates
+            if not tech_jobs:
+                console.print("  [dim]No USA-based tech jobs found for this company.[/dim]")
+                stats.status = "SUCCESS"
+                self.repo.update_job_source_status(source.id, success=True)
+                return
+
             # Step 6: Check this Job in DB & Classify Employment Type (Full-Time vs Contract)
             job_ids = [j.external_job_id for j, _ in tech_jobs]
             db_existing_map = self.repo.check_existing_jobs(company.id, job_ids)
@@ -295,31 +337,27 @@ class ScraperAgent:
             )
 
             for raw_job, tech_kw, emp_type in target_classified:
-                # Update session employment counts
-                if emp_type == "FULL_TIME":
-                    self.session_stats["full_time_jobs"] += 1
-                elif emp_type == "CONTRACT":
-                    self.session_stats["contract_jobs"] += 1
-
-                # If description is short or location/title is missing, fetch deep page details
+                # Flow Step 7: Always fetch deep job details (full JD, full location, real title) from the job page
                 desc = raw_job.raw_description
                 if raw_job.job_url and raw_job.job_url.startswith("http"):
-                    if len(desc) < 120 or not raw_job.raw_location or raw_job.title.lower() in ["apply", "apply now", "view job"]:
-                        deep_info = BaseScraper.fetch_job_deep_info(raw_job.job_url)
-                        if deep_info.get("description"):
-                            desc = deep_info["description"]
-                            raw_job.raw_description = desc
-                        if deep_info.get("location") and not raw_job.raw_location:
-                            raw_job.raw_location = deep_info["location"]
-                        if deep_info.get("title") and (raw_job.title.lower() in ["apply", "apply now", "view job"] or len(raw_job.title) < 5):
-                            raw_job.title = deep_info["title"]
+                    deep_info = BaseScraper.fetch_job_deep_info(raw_job.job_url)
+                    if deep_info.get("description") and len(deep_info["description"]) > len(desc):
+                        desc = deep_info["description"]
+                        raw_job.raw_description = desc
+                    if deep_info.get("location"):
+                        deep_loc = deep_info["location"].strip()
+                        # If current location is generic (Remote, Hybrid, empty) or deep location is more detailed
+                        if not raw_job.raw_location or raw_job.raw_location.lower() in ["remote", "hybrid", "onsite", "unspecified", "none", ""]:
+                            raw_job.raw_location = deep_loc
+                        elif any(intl in deep_loc.lower() for intl in ["india", "bengaluru", "hyderabad", "karnataka", "telangana", "pune", "uk", "london", "canada"]):
+                            raw_job.raw_location = deep_loc
+                    if deep_info.get("title") and (raw_job.title.lower() in ["apply", "apply now", "view job"] or len(raw_job.title) < 5):
+                        raw_job.title = deep_info["title"]
 
                 # Deduce Tech Role from Job Description
                 tech_role = JDAnalyzer.deduce_tech_role_from_jd(
                     title=raw_job.title, description=desc
                 )
-                roles_map = self.session_stats["tech_roles_breakdown"]
-                roles_map[tech_role] = roles_map.get(tech_role, 0) + 1
 
                 processed_job = self.scrape_job_details(
                     company_id=company.id,
@@ -329,19 +367,32 @@ class ScraperAgent:
                     tech_role=tech_role,
                     tech_keywords=tech_kw,
                 )
-                processed_jobs.append(processed_job)
+                if processed_job:
+                    processed_jobs.append(processed_job)
+                    roles_map = self.session_stats["tech_roles_breakdown"]
+                    roles_map[tech_role] = roles_map.get(tech_role, 0) + 1
+                    # Update session employment counts
+                    if emp_type == "FULL_TIME":
+                        self.session_stats["full_time_jobs"] += 1
+                    elif emp_type == "CONTRACT":
+                        self.session_stats["contract_jobs"] += 1
+                else:
+                    self.session_stats["non_usa_jobs_skipped"] += 1
 
             # Step 8: Store Jobs in Database
             console.print(
-                f"  [bold green]▶ Step 8 (Store Jobs in Database):[/bold green] Storing {len(processed_jobs)} jobs in PostgreSQL..."
+                f"  [bold green]▶ Step 8 (Store Jobs in Database):[/bold green] Storing {len(processed_jobs)} USA jobs in PostgreSQL..."
             )
-            self.store_jobs_in_database(processed_jobs, stats)
+            if processed_jobs:
+                self.store_jobs_in_database(processed_jobs, stats)
+                console.print(
+                    f"  [bold green]✓ Stored in DB:[/bold green] +{stats.new_jobs} new, ~{stats.updated_jobs} updated, ={stats.duplicate_jobs} existing."
+                )
+            else:
+                console.print("  [dim]No new USA-based jobs to store for this company.[/dim]")
 
             stats.status = "SUCCESS"
             self.repo.update_job_source_status(source.id, success=True)
-            console.print(
-                f"  [bold green]✓ Stored in DB:[/bold green] +{stats.new_jobs} new, ~{stats.updated_jobs} updated, ={stats.duplicate_jobs} existing."
-            )
 
         except Exception as exc:
             logger.error(f"Error processing jobs for {company.name} ({source.source_url}): {exc}", exc_info=True)
@@ -403,10 +454,11 @@ class ScraperAgent:
         employment_type: str,
         tech_role: str,
         tech_keywords: List[str],
-    ) -> ProcessedJob:
+    ) -> Optional[ProcessedJob]:
         """
         Cleans and extracts full job attributes, normalizes geography & remote type,
         assigns deduced tech role, and computes SHA-256 content hash.
+        Returns None if job is not confirmed USA-based.
         """
         city, state, country, remote_type = parse_location(
             raw_location=raw_job.raw_location,
@@ -414,17 +466,34 @@ class ScraperAgent:
             description=raw_job.raw_description,
         )
 
+        # STRICT USA-ONLY VALIDATION:
+        if not is_usa_location(
+            raw_location=raw_job.raw_location,
+            title=raw_job.title,
+            description=raw_job.raw_description,
+            city=city,
+            state=state,
+            country=country,
+        ):
+            logger.info(
+                f"Skipping non-USA job: {raw_job.title} | {raw_job.raw_location} -> {city}, {state}, {country}"
+            )
+            return None
+
+        # Confirmed USA location
+        country = "United States"
+
         # Build clean display location: NEVER allow '/ Unspecified' or dummy noise
         clean_display_loc = raw_job.raw_location
         if not clean_display_loc or any(n in clean_display_loc.lower() for n in ["unspecified", "not specified", "n/a", "none"]):
             if city and state:
-                clean_display_loc = f"{city}, {state}, {country}"
+                clean_display_loc = f"{city}, {state}, United States"
             elif state:
-                clean_display_loc = f"{state}, {country}"
+                clean_display_loc = f"{state}, United States"
             elif remote_type == "REMOTE":
                 clean_display_loc = "Remote, United States"
             else:
-                clean_display_loc = country or "United States"
+                clean_display_loc = "United States"
 
         content_hash = BaseScraper.compute_content_hash(
             title=raw_job.title,
@@ -442,7 +511,7 @@ class ScraperAgent:
             location=clean_display_loc,
             city=city,
             state=state,
-            country=country,
+            country="United States",
             remote_type=remote_type,
             employment_type=employment_type,
             tech_role=tech_role,
@@ -485,6 +554,7 @@ class ScraperAgent:
         table.add_row("Fresh Postings (Prev + Current Month)", str(self.session_stats["fresh_jobs_passed"]))
         table.add_row("Stale Jobs Skipped", str(self.session_stats["stale_jobs_skipped"]))
         table.add_row("Tech Jobs Filtered", str(self.session_stats["tech_jobs_passed"]))
+        table.add_row("International (Non-USA) Skipped", str(self.session_stats["non_usa_jobs_skipped"]))
         table.add_row("DB Status Check - New Jobs", str(self.session_stats["db_new_jobs"]))
         table.add_row("DB Status Check - Existing Jobs", str(self.session_stats["db_existing_jobs"]))
         table.add_row("  - Full-Time Jobs", str(self.session_stats["full_time_jobs"]))

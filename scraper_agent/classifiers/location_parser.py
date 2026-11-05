@@ -101,6 +101,80 @@ MAJOR_US_CITIES_TO_STATE: Dict[str, str] = {
     "newark": "NJ", "jersey city": "NJ", "princeton": "NJ", "hoboken": "NJ",
 }
 
+# Comprehensive International Countries, Territories, and Non-USA Cities
+INTERNATIONAL_LOCATIONS: Dict[str, str] = {
+    # India
+    "india": "India", "bengaluru": "India", "bangalore": "India", "hyderabad": "India",
+    "pune": "India", "mumbai": "India", "delhi": "India", "new delhi": "India",
+    "gurgaon": "India", "gurugram": "India", "noida": "India", "chennai": "India",
+    "kolkata": "India", "ahmedabad": "India", "karnataka": "India", "telangana": "India",
+    "maharashtra": "India", "tamil nadu": "India",
+    # United Kingdom
+    "united kingdom": "United Kingdom", "uk": "United Kingdom", "england": "United Kingdom",
+    "great britain": "United Kingdom", "london": "United Kingdom", "manchester": "United Kingdom",
+    "edinburgh": "United Kingdom", "birmingham": "United Kingdom", "bristol": "United Kingdom",
+    "scotland": "United Kingdom", "wales": "United Kingdom", "northern ireland": "United Kingdom",
+    "cambridge, uk": "United Kingdom", "oxford, uk": "United Kingdom",
+    # Canada
+    "canada": "Canada", "toronto": "Canada", "vancouver": "Canada", "montreal": "Canada",
+    "ottawa": "Canada", "calgary": "Canada", "waterloo": "Canada", "ontario": "Canada",
+    "british columbia": "Canada", "quebec": "Canada",
+    # Germany
+    "germany": "Germany", "berlin": "Germany", "munich": "Germany", "frankfurt": "Germany",
+    "hamburg": "Germany", "cologne": "Germany", "stuttgart": "Germany",
+    # France
+    "france": "France", "paris": "France", "lyon": "France", "marseille": "France", "toulouse": "France",
+    # Ireland
+    "ireland": "Ireland", "dublin": "Ireland", "cork": "Ireland", "galway": "Ireland",
+    # Netherlands
+    "netherlands": "Netherlands", "amsterdam": "Netherlands", "rotterdam": "Netherlands", "utrecht": "Netherlands",
+    # Switzerland
+    "switzerland": "Switzerland", "zurich": "Switzerland", "geneva": "Switzerland", "lausanne": "Switzerland",
+    # Japan
+    "japan": "Japan", "tokyo": "Japan", "osaka": "Japan", "kyoto": "Japan", "yokohama": "Japan",
+    # Singapore
+    "singapore": "Singapore",
+    # Australia
+    "australia": "Australia", "sydney": "Australia", "melbourne": "Australia", "brisbane": "Australia", "perth": "Australia",
+    # Israel
+    "israel": "Israel", "tel aviv": "Israel", "jerusalem": "Israel", "haifa": "Israel", "herzliya": "Israel",
+    # Brazil
+    "brazil": "Brazil", "são paulo": "Brazil", "sao paulo": "Brazil", "rio de janeiro": "Brazil",
+    # Mexico
+    "mexico": "Mexico", "mexico city": "Mexico", "guadalajara": "Mexico", "monterrey": "Mexico",
+    # Poland
+    "poland": "Poland", "warsaw": "Poland", "krakow": "Poland", "wroclaw": "Poland",
+    # Spain
+    "spain": "Spain", "madrid": "Spain", "barcelona": "Spain",
+    # Italy
+    "italy": "Italy", "rome": "Italy", "milan": "Italy",
+    # Sweden
+    "sweden": "Sweden", "stockholm": "Sweden", "gothenburg": "Sweden",
+    # China & Taiwan
+    "china": "China", "beijing": "China", "shanghai": "China", "shenzhen": "China",
+    "taiwan": "Taiwan", "taipei": "Taiwan",
+    # South Korea
+    "south korea": "South Korea", "seoul": "South Korea",
+    # UAE
+    "united arab emirates": "United Arab Emirates", "uae": "United Arab Emirates", "dubai": "United Arab Emirates",
+    # Argentina, Colombia, Chile
+    "argentina": "Argentina", "buenos aires": "Argentina",
+    "colombia": "Colombia", "bogota": "Colombia",
+    "chile": "Chile", "santiago": "Chile",
+    "costa rica": "Costa Rica",
+    # Philippines, Vietnam, Indonesia
+    "philippines": "Philippines", "manila": "Philippines",
+    "vietnam": "Vietnam", "ho chi minh": "Vietnam",
+    "indonesia": "Indonesia", "jakarta": "Indonesia",
+    "new zealand": "New Zealand", "auckland": "New Zealand",
+}
+
+# Non-USA regional indicators
+INTERNATIONAL_REGIONAL_KEYWORDS = {
+    "emea", "apac", "latam", "europe", "asia", "latin america", "middle east",
+    "in-karnataka", "in-telangana", "in-maharashtra", "in-tamil",
+}
+
 REMOTE_KEYWORDS = [r"\bremote\b", r"\bwork from home\b", r"\bwfh\b", r"\banywhere\b", r"\bvirtual\b", r"\btelecommute\b"]
 HYBRID_KEYWORDS = [r"\bhybrid\b", r"\bflexible\b"]
 ON_SITE_KEYWORDS = [r"\bon-site\b", r"\bonsite\b", r"\bin-office\b", r"\boffice-based\b"]
@@ -119,11 +193,30 @@ NOISE_LOCATION_WORDS = {
 
 
 def _clean_location_string(raw: str) -> str:
-    """Removes parenthetical noise and extra punctuation."""
+    """Removes parenthetical noise, ATS prefixes, and extra punctuation."""
     if not raw:
         return ""
+    # Reject survey/form questions scraped as location
+    if "?" in raw or any(q in raw.lower() for q in ["where are you", "what is your", "are you located"]):
+        return ""
+
+    # Normalize Workday/ATS patterns like US-CA-Campbell-254 or US-TX-Austin
+    m_wd = re.match(r"^(?:US|USA)-([A-Za-z]{2})-([A-Za-z0-9_-]+)$", raw.strip(), re.IGNORECASE)
+    if m_wd:
+        st = m_wd.group(1).upper()
+        city_raw = re.sub(r"-\d+$", "", m_wd.group(2)).replace("-", " ").strip().title()
+        return f"{city_raw}, {st}, United States"
+
+    # Normalize Indian ATS patterns like IN-Karnataka-Bangalore or IN-HR-Gurugram-418
+    m_in = re.match(r"^IN-([A-Za-z0-9_-]+)", raw.strip(), re.IGNORECASE)
+    if m_in:
+        part = re.sub(r"-\d+$", "", m_in.group(1)).replace("-", ", ").strip().title()
+        return f"{part}, India"
+
+    # Replace bullet points and symbols
+    cleaned = raw.replace("•", ",").replace("·", ",")
     # Strip parentheses like (Remote), (Hybrid)
-    cleaned = re.sub(r"\(.*?\)", "", raw)
+    cleaned = re.sub(r"\(.*?\)", "", cleaned)
     # Strip brackets
     cleaned = re.sub(r"\[.*?\]", "", cleaned)
     # Replace slashes and pipes with commas
@@ -133,10 +226,129 @@ def _clean_location_string(raw: str) -> str:
     return cleaned
 
 
+def detect_international_country(text: str) -> Optional[Tuple[str, Optional[str]]]:
+    """
+    Checks if text points to an international (non-USA) country or city.
+    Returns (CountryName, CityName) if matched, else None.
+    """
+    if not text:
+        return None
+    text_lower = text.lower()
+
+    # Direct keyword search against known foreign locations
+    for loc_key, country_name in INTERNATIONAL_LOCATIONS.items():
+        if re.search(rf"\b{re.escape(loc_key)}\b", text_lower):
+            city_name = loc_key.title() if loc_key != country_name.lower() else None
+            return country_name, city_name
+
+    for reg in INTERNATIONAL_REGIONAL_KEYWORDS:
+        if re.search(rf"\b{re.escape(reg)}\b", text_lower):
+            return reg.upper(), None
+
+    return None
+
+
+def is_usa_location(
+    raw_location: str,
+    title: str = "",
+    description: str = "",
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    country: Optional[str] = None,
+) -> bool:
+    """
+    Returns True ONLY if the job is physically in the United States or is US-Remote.
+    Returns False for international locations (e.g. Bengaluru India, London UK, Canada, Paris, EMEA, etc.).
+    """
+    raw_lower = (raw_location or "").lower()
+    title_lower = (title or "").lower()
+    combined_header = f"{raw_lower} {title_lower}".replace("•", " ").replace("·", " ")
+    desc_header = (description or "")[:1500].lower().replace("•", " ").replace("·", " ")
+
+    # 1. Definite Non-USA check in raw location, title, parsed city, or JD header
+    # If explicitly flagged with foreign city/country, immediately reject
+    int_info = detect_international_country(combined_header)
+    if not int_info:
+        int_info = detect_international_country(desc_header)
+
+    if int_info:
+        # Check if it also explicitly mentions USA (e.g. "San Francisco, CA • London, UK")
+        # If it specifically names non-US like London, England or Bengaluru, India alone:
+        if not re.search(r"\b(?:united states|usa|u\.s\.|california|texas|new york|washington|florida)\b", combined_header):
+            return False
+        # If title or JD specifically targeted international (e.g. "Technical Quality Specialist (Bengaluru, India)"):
+        if any(f"({k}" in title_lower or f" {k})" in title_lower for k in INTERNATIONAL_LOCATIONS.keys()):
+            return False
+        if any(k in desc_header[:300] for k in ["bengaluru", "hyderabad", "karnataka", "telangana", "pune", "maharashtra", "india", "london", "canada"]):
+            return False
+
+    if country and country != "United States":
+        return False
+
+    if city and city.lower() in INTERNATIONAL_LOCATIONS and city.lower() not in MAJOR_US_CITIES_TO_STATE:
+        return False
+
+    # 2. Definite Positive USA confirmation
+    # State is valid US state code
+    if state and state.upper() in US_STATE_CODES:
+        return True
+
+    # City matches a known major US city
+    if city and city.lower() in MAJOR_US_CITIES_TO_STATE:
+        return True
+
+    # Explicit US Remote keywords
+    if re.search(
+        r"\b(?:remote\s*[-–—/,]?\s*(?:us|usa|united states)|(?:us|usa|united states)\s*[-–—/,]?\s*remote)\b|\bremote\s*\(\s*(?:us|usa|united states)\s*\)",
+        combined_header,
+    ):
+        return True
+
+    # Raw location contains "United States", "USA", or "U.S."
+    if re.search(r"\b(?:united states|usa|u\.s\.|u\.s\.a\.)\b", raw_lower):
+        # Ensure it doesn't also say "London, United Kingdom" or "India"
+        if not int_info:
+            return True
+
+    # Check for City, ST in raw location (e.g. "San Francisco, CA" or "Austin, TX")
+    if re.search(r"\b[A-Za-z\s.-]+,\s*[A-Z]{2}\b", raw_location or ""):
+        m = re.findall(r"\b([A-Z]{2})\b", raw_location or "")
+        if any(code in US_STATE_CODES for code in m):
+            return True
+
+    # Check for ATS pattern like US-CA-Campbell or USA-TX
+    if re.search(r"\b(?:us|usa)-([a-z]{2})\b", raw_lower):
+        m = re.search(r"\b(?:us|usa)-([a-z]{2})\b", raw_lower)
+        if m and m.group(1).upper() in US_STATE_CODES:
+            return True
+
+    # Check description snippet for US state indicators
+    desc_snippet = (description or "")[:2000].lower()
+    if re.search(r"\b(?:location|office|based in):\s*[a-z\s.-]+,\s*([a-z]{2})\b", desc_snippet):
+        m = re.search(r"\b(?:location|office|based in):\s*[a-z\s.-]+,\s*([a-z]{2})\b", desc_snippet)
+        if m and m.group(1).upper() in US_STATE_CODES:
+            return True
+
+    # Check description snippet for strong US indicators (US work authorization, 401(k), United States)
+    if not int_info:
+        if re.search(r"\b(?:authorized to work in the (?:us|u\.s\.|united states)|work authorization in the (?:us|u\.s\.|united states)|401\(k\)|united states)\b", desc_snippet):
+            if not detect_international_country(desc_snippet[:400]):
+                return True
+
+    # Default to False: Only scrape confirmed USA locations!
+    return False
+
+
 def _extract_from_text(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Scans text (e.g. JD snippet) for structured City, State or Location: patterns."""
     if not text:
         return None, None, None
+
+    # Check for international indicator in text
+    int_info = detect_international_country(text[:500])
+    if int_info:
+        country_name, city_name = int_info
+        return city_name, None, country_name
 
     # Pattern 1: "Location: City, State" or "Based in City, State"
     prefix_rx = re.search(
@@ -194,9 +406,9 @@ def parse_location(
     """
     Parses location into (city, state, country, remote_type).
     Guarantees:
+      - Accurately detects non-USA countries (India, UK, Canada, France, etc.) and does NOT falsely set them to 'United States'.
       - city is NEVER '/ Unspecified', 'Unspecified', 'Remote', or placeholder noise.
       - state is a valid 2-letter postal code (e.g. 'CA', 'TX', 'NY') or None.
-      - country is 'United States' for US jobs.
       - remote_type is one of: 'REMOTE', 'HYBRID', 'ON_SITE', 'UNKNOWN'.
     """
     raw_str = (raw_location or "").strip()
@@ -219,7 +431,16 @@ def parse_location(
         elif raw_str:
             remote_type = "ON_SITE"
 
-    # 2. Clean location text
+    # 2. Check for International (Non-USA) Location FIRST
+    int_info = detect_international_country(f"{raw_str} {title_str}")
+    if int_info:
+        country_detected, city_detected = int_info
+        # If it's multi-location like "San Francisco, CA • London, England", check for US part
+        if not re.search(r"\b(?:united states|usa|u\.s\.|california|texas|new york|washington)\b", raw_str.lower()):
+            city = city_detected or raw_str.split(",")[0].strip()
+            return city, None, country_detected, remote_type
+
+    # 3. Clean location text
     cleaned = _clean_location_string(raw_str)
     # Remove words like remote, hybrid, onsite from location string
     cleaned = re.sub(r"(?i)\b(remote|hybrid|onsite|on-site|office|workplace)\b", "", cleaned).strip(" ,-")
@@ -254,8 +475,10 @@ def parse_location(
             city = part.title()
             state = MAJOR_US_CITIES_TO_STATE[part_lower]
             country = "United States"
+        elif part_lower in INTERNATIONAL_LOCATIONS:
+            country = INTERNATIONAL_LOCATIONS[part_lower]
+            city = part.title() if part_lower != country.lower() else None
         else:
-            # Check if part itself contains "City State" like "San Francisco CA"
             m = re.match(r"^([A-Za-z\s.-]+)\s+([A-Z]{2})$", part)
             if m and m.group(2) in US_STATE_CODES:
                 city = m.group(1).strip().title()
@@ -283,8 +506,10 @@ def parse_location(
             country = "United States"
             if cand_city.lower() in MAJOR_US_CITIES_TO_STATE:
                 state = MAJOR_US_CITIES_TO_STATE[cand_city.lower()]
+        elif second_lower in INTERNATIONAL_LOCATIONS:
+            country = INTERNATIONAL_LOCATIONS[second_lower]
+            city = cand_city
         else:
-            # Check 3rd part if present for Country / State
             city = cand_city
             if len(filtered_parts) >= 3:
                 third = filtered_parts[2].strip()
@@ -296,8 +521,10 @@ def parse_location(
                     country = "United States"
                 elif third.upper() in ("USA", "US", "UNITED STATES"):
                     country = "United States"
+                elif third.lower() in INTERNATIONAL_LOCATIONS:
+                    country = INTERNATIONAL_LOCATIONS[third.lower()]
 
-    # 3. If city or state could not be found from raw_location, extract from description & title
+    # 4. If city or state could not be found from raw_location, extract from description & title
     if not city and not state:
         c_desc, s_desc, co_desc = _extract_from_text(f"{desc_str} {title_str}")
         if c_desc or s_desc:
@@ -307,7 +534,7 @@ def parse_location(
     elif city and not state and city.lower() in MAJOR_US_CITIES_TO_STATE:
         state = MAJOR_US_CITIES_TO_STATE[city.lower()]
 
-    # 4. Strict Sanitization: city must NEVER be a noise word, slash, or placeholder
+    # 5. Strict Sanitization: city must NEVER be a noise word, slash, or placeholder
     if city:
         city_clean = city.strip(" /|-,").strip()
         if (
@@ -327,7 +554,6 @@ def parse_location(
         else:
             state = state_clean
 
-    # If both city and state are missing, but remote_type is REMOTE, country is default_country
     if not country:
         country = default_country
 
