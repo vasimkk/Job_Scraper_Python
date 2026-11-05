@@ -23,3 +23,4 @@ with get_dict_cursor() as cur:
     print(f"Distinct companies with job-boards.greenhouse.io: {len(rows)}")
     for r in rows:
         print(f"  {r['name']} ({r['job_count']} jobs) -> {r['career_url']}")
+

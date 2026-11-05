@@ -30,3 +30,4 @@ for s in samples:
         print(f"{s['name'][:20]:<20} | status: {resp.status_code} ({len(resp.content)} bytes) | {candidate_url}")
     except Exception as e:
         print(f"{s['name'][:20]:<20} | error: {e}")
+

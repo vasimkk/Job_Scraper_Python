@@ -37,3 +37,4 @@ print("4. Figma domain careers:", r4.status_code, "len:", len(r4.content))
 print("\nHeaders of r2:")
 for k, v in r2.headers.items():
     print(f"  {k}: {v}")
+

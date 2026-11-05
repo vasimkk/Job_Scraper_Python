@@ -34,3 +34,4 @@ for s in samples:
         code2 = str(e)[:30]
 
     print(f"Company: {s['name'][:20]:<20} | job-boards: {code1} | boards: {code2} | {u}")
+

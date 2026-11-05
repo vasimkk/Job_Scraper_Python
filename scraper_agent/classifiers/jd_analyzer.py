@@ -158,8 +158,41 @@ COMPILED_ROLE_REGEX = [
 # Employment Type Patterns
 CONTRACT_PATTERNS = [
     r"\bcontract\b", r"\bcontractor\b", r"\bc2c\b", r"\bcorp-to-corp\b",
-    r"\b1099\b", r"\bw2 contract\b", r"\bfreelance\b", r"\btemporary\b",
-    r"\btemp\b", r"\bfixed-term\b", r"\bconsultant\b", r"\bcontingent\b",
+    r"\bcorp to corp\b", r"\b1099\b", r"\bw2 contract\b", r"\bcontract[- ]to[- ]hire\b",
+    r"\bcontract to hire\b", r"\bc2h\b", r"\bfreelance\b", r"\btemporary\b",
+    r"\btemp\b", r"\btemp[- ]to[- ]perm\b", r"\btemporary to permanent\b",
+    r"\bfixed[- ]term\b", r"\bfixed term\b", r"\bconsultant\b", r"\bcontingent\b",
+    r"\bcontingent worker\b", r"\bsubcontractor\b", r"\bhourly contract\b",
+    r"\b\d+[- ]months?\s+contract\b", r"\b\d+[- ]years?\s+contract\b",
+    r"\bcontract\s+(?:role|position|opportunity|basis|assignment|duration|engagement)\b",
+]
+
+CONTRACT_DESC_PATTERNS = [
+    r"(?:job|employment|position|work|role)\s+type\s*:\s*.*?\b(?:contract|temporary|fixed[- ]term|fixed term|c2c|1099|c2h|contractor)\b",
+    r"\bcontract[- ]to[- ]hire\b",
+    r"\bc2h\b",
+    r"\btemp[- ]to[- ]perm\b",
+    r"\btemporary to permanent\b",
+    r"\b\d+[- ]months?\s+contract\b",
+    r"\b\d+[- ]years?\s+contract\b",
+    r"\bcontract\s+(?:role|position|basis|opportunity|assignment|duration|engagement)\b",
+    r"\b(?:w2|c2c|1099)\s+(?:contract|contractor|role|position|basis)\b",
+    r"\bcorp[- ]to[- ]corp\b",
+    r"\bfixed[- ]term\s+(?:contract|position|role|employment)\b",
+    r"\bstatement of work\b",
+]
+
+DISCLAIMER_PATTERNS = [
+    r"(?i)\bfederal contractor\b",
+    r"(?i)\bgovernment contractor\b",
+    r"(?i)\baffirmative action\b.*?\bcontractor\b",
+    r"(?i)\bemployment or an? (?:independent )?contractor role\b",
+    r"(?i)\bapplicant or (?:independent )?contractor\b",
+    r"(?i)\bemployee or (?:contingent worker|contractor)\b",
+    r"(?i)\bformer employee or contractor\b",
+    r"(?i)\bprevious employee or contractor\b",
+    r"(?i)\bindependent contractor status under\b",
+    r"(?i)\bdoes not constitute an? (?:employment )?contract\b",
 ]
 
 PART_TIME_PATTERNS = [
@@ -175,10 +208,22 @@ FULL_TIME_PATTERNS = [
     r"\bsalaried\b", r"\bfte\b",
 ]
 
+FT_OVERRIDE_PATTERNS = [
+    r"(?i)\bthe\s+position\s+is\s+full[- ]time\b",
+    r"(?i)\bthis\s+is\s+a\s+full[- ]time\b",
+    r"(?i)\bfor\s+this\s+full[- ]time\b",
+    r"(?i)\bfull[- ]time\s+(?:position|role|salaried|employment)\b",
+    r"(?i)\bemployment\s+type\s*:\s*full[- ]time\b",
+    r"(?i)\bjob\s+type\s*:\s*full[- ]time\b",
+]
+
 RX_CONTRACT = [re.compile(p, re.IGNORECASE) for p in CONTRACT_PATTERNS]
+RX_CONTRACT_DESC = [re.compile(p, re.IGNORECASE) for p in CONTRACT_DESC_PATTERNS]
+RX_DISCLAIMER = [re.compile(p, re.IGNORECASE) for p in DISCLAIMER_PATTERNS]
 RX_PART_TIME = [re.compile(p, re.IGNORECASE) for p in PART_TIME_PATTERNS]
 RX_INTERN = [re.compile(p, re.IGNORECASE) for p in INTERN_PATTERNS]
 RX_FULL_TIME = [re.compile(p, re.IGNORECASE) for p in FULL_TIME_PATTERNS]
+RX_FT_OVERRIDE = [re.compile(p, re.IGNORECASE) for p in FT_OVERRIDE_PATTERNS]
 
 
 class JDAnalyzer:
@@ -267,32 +312,47 @@ class JDAnalyzer:
         based on the Job Description, title, and source metadata.
         """
         meta = metadata or {}
-        combined = " ".join([
+        meta_str = " ".join([
             str(meta.get("commitment", "")),
             str(meta.get("employment_type", "")),
             str(meta.get("type", "")),
-            title,
-            description[:800],
         ])
 
-        # 1. Internship
+        # 1. Internship (check title and metadata)
         for rx in RX_INTERN:
-            if rx.search(title) or rx.search(str(meta)):
+            if rx.search(title) or rx.search(meta_str):
                 return "INTERNSHIP"
 
-        # 2. Contract
+        # 2. Contract: check title and metadata directly
         for rx in RX_CONTRACT:
-            if rx.search(combined):
+            if rx.search(title) or rx.search(meta_str):
                 return "CONTRACT"
 
-        # 3. Part-Time
+        # 3. Clean description of standard EEO/HR disclaimers
+        clean_desc = description
+        for d_rx in RX_DISCLAIMER:
+            clean_desc = d_rx.sub(" ", clean_desc)
+
+        # 4. Check Explicit Full-Time Override in Description (e.g. "The position is full-time")
+        # If the employer explicitly states the role is full-time, casual mentions of "contract"
+        # (such as managing vendor contracts, contract manufacturing, or client contracts) do not make it a contract job.
+        for rx in RX_FT_OVERRIDE:
+            if rx.search(clean_desc):
+                return "FULL_TIME"
+
+        # 5. Check high-precision contract section patterns across full description
+        for rx in RX_CONTRACT_DESC:
+            if rx.search(clean_desc):
+                return "CONTRACT"
+
+        # 6. Part-Time
         for rx in RX_PART_TIME:
-            if rx.search(combined):
+            if rx.search(title) or rx.search(meta_str) or rx.search(clean_desc[:1200]):
                 return "PART_TIME"
 
-        # 4. Full-Time
+        # 7. Full-Time
         for rx in RX_FULL_TIME:
-            if rx.search(combined):
+            if rx.search(title) or rx.search(meta_str) or rx.search(clean_desc[:1200]):
                 return "FULL_TIME"
 
         # Default standard corporate role

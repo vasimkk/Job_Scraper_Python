@@ -40,3 +40,4 @@ for name, jid, slug, c_url in test_cases:
             print(f"  Option B ({url_b}): {resp.status} (Length: {len(resp.read())})")
     except Exception as e:
         print(f"  Option B ({url_b}) FAILED: {e}")
+

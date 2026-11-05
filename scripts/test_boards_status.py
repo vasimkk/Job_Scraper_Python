@@ -18,3 +18,4 @@ with get_dict_cursor() as cur:
             print(f"{r['name'][:20]:<20} | status: {resp.status_code} | {r['job_url']}")
         except Exception as e:
             print(f"{r['name'][:20]:<20} | {e}")
+

@@ -102,12 +102,11 @@ class PlaywrightCareerScraper(BaseScraper):
                     jid = str(item.get("id"))
                     title = (item.get("title") or "").strip()
                     loc = item.get("location", {}).get("name", "") if isinstance(item.get("location"), dict) else ""
-                    # Use official absolute_url from API or fallback to canonical greenhouse URL
+                    # Prefer canonical greenhouse URL so deep detail fetch never 404s on custom SPA domains
+                    canonical_gh_url = f"https://boards.greenhouse.io/{slug}/jobs/{jid}"
                     raw_abs_url = item.get("absolute_url") or ""
-                    if raw_abs_url and "boards.greenhouse.io/company/" not in raw_abs_url:
-                        job_url = raw_abs_url
-                    else:
-                        job_url = f"https://boards.greenhouse.io/{slug}/jobs/{jid}"
+                    app_url = raw_abs_url if (raw_abs_url and "boards.greenhouse.io/company/" not in raw_abs_url) else canonical_gh_url
+                    job_url = canonical_gh_url
                     posts.append(
                         RawJobPost(
                             external_job_id=f"gh_{slug}_{jid}",
@@ -115,7 +114,7 @@ class PlaywrightCareerScraper(BaseScraper):
                             raw_description=title,
                             raw_location=loc,
                             job_url=job_url,
-                            application_url=job_url,
+                            application_url=app_url,
                             posted_at=datetime.now(timezone.utc),
                         )
                     )

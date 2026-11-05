@@ -21,3 +21,4 @@ for r in rows:
         print(f"{urlparse(r['job_url']).netloc:<30} -> {resp.status_code} ({len(resp.content)} bytes)")
     except Exception as e:
         print(f"{urlparse(r['job_url']).netloc:<30} -> ERROR: {e}")
+

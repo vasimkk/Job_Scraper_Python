@@ -81,7 +81,7 @@ class BaseScraper(ABC):
         if "boards.greenhouse.io/company/" in job_url:
             return False
 
-        # Fast Greenhouse API check
+        # Fast Greenhouse API check (handles both greenhouse.io and custom domains with gh_jid=)
         if "greenhouse.io/" in job_url:
             gh_m = re.search(r"greenhouse\.io/(?:job-boards/)?([a-zA-Z0-9_-]+)/jobs/(\d+)", job_url)
             if gh_m:
@@ -93,6 +93,18 @@ class BaseScraper(ABC):
                         return r.status_code == 200
                     except Exception:
                         return False
+        elif "gh_jid=" in job_url:
+            gh_jid_m = re.search(r"gh_jid=(\d+)", job_url)
+            domain_m = re.search(r"https?://(?:www\.|careers\.)?([a-zA-Z0-9_-]+)\.", job_url)
+            if gh_jid_m and domain_m:
+                slug, jid = domain_m.group(1), gh_jid_m.group(1)
+                try:
+                    api_u = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{jid}"
+                    r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent}, timeout=5)
+                    if r.status_code == 200:
+                        return True
+                except Exception:
+                    pass
 
         try:
             resp = requests.get(
@@ -158,6 +170,31 @@ class BaseScraper(ABC):
                             return result
                     except Exception:
                         pass
+        elif "gh_jid=" in job_url:
+            gh_jid_m = re.search(r"gh_jid=(\d+)", job_url)
+            domain_m = re.search(r"https?://(?:www\.|careers\.)?([a-zA-Z0-9_-]+)\.", job_url)
+            if gh_jid_m and domain_m:
+                slug, jid = domain_m.group(1), gh_jid_m.group(1)
+                try:
+                    api_u = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{jid}"
+                    r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent}, timeout=5)
+                    if r.status_code == 200:
+                        data = r.json()
+                        result["is_active"] = True
+                        if data.get("title"):
+                            result["title"] = data["title"].strip()
+                        loc_data = data.get("location")
+                        if isinstance(loc_data, dict) and loc_data.get("name"):
+                            result["location"] = loc_data["name"].strip()
+                        content_html = data.get("content") or ""
+                        if content_html:
+                            result["description"] = BaseScraper.clean_html(content_html)
+                        return result
+                    elif r.status_code == 404:
+                        result["is_active"] = False
+                        return result
+                except Exception:
+                    pass
 
         try:
             resp = requests.get(

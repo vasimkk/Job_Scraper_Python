@@ -25,3 +25,4 @@ for cname, url, career_url in rows:
             print(f"[OK 200] {cname}: {url}")
     except Exception as e:
         print(f"[FAILED {e}] {cname}: {url} (Company career: {career_url})")
+

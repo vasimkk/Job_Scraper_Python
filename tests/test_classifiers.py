@@ -49,6 +49,25 @@ class TestClassifiers(unittest.TestCase):
             "CONTRACT"
         )
         self.assertEqual(
+            classify_employment_type("Senior Technical Recruiter (Fixed Term)"),
+            "CONTRACT"
+        )
+        self.assertEqual(
+            classify_employment_type("Java Developer (Contract-to-Hire)"),
+            "CONTRACT"
+        )
+        self.assertEqual(
+            classify_employment_type("DevOps Engineer", description="Job Type: Contract / W2"),
+            "CONTRACT"
+        )
+        self.assertEqual(
+            classify_employment_type(
+                "Construction Quality Assurance/Quality Control Manager, EPC",
+                description="The QA/QC Manager will contract third-party special inspections and audit contractor turnover. The position is full-time."
+            ),
+            "FULL_TIME"
+        )
+        self.assertEqual(
             classify_employment_type("Cloud Architect (Full-time Regular)"),
             "FULL_TIME"
         )

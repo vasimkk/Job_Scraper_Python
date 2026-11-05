@@ -109,6 +109,13 @@ class TestJDAnalyzer(unittest.TestCase):
         )
         self.assertEqual(emp, "INTERNSHIP")
 
+        # Full-time with vendor/contract mentions in JD text
+        emp = JDAnalyzer.deduce_employment_type_from_jd(
+            "Construction Quality Assurance/Quality Control Manager, EPC",
+            "Coordinate third-party special inspections and audit contractor turnover. The position is full-time."
+        )
+        self.assertEqual(emp, "FULL_TIME")
+
         # Full-time
         emp = JDAnalyzer.deduce_employment_type_from_jd(
             "Staff Platform Architect",

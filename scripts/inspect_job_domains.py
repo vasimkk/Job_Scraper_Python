@@ -15,3 +15,4 @@ print(f"Total jobs: {len(jobs)}")
 print("Domains breakdown:")
 for domain, count in domains.most_common():
     print(f"  {domain:<40} : {count}")
+
