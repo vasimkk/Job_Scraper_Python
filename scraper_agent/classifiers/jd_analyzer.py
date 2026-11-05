@@ -179,7 +179,6 @@ CONTRACT_DESC_PATTERNS = [
     r"\b(?:w2|c2c|1099)\s+(?:contract|contractor|role|position|basis)\b",
     r"\bcorp[- ]to[- ]corp\b",
     r"\bfixed[- ]term\s+(?:contract|position|role|employment)\b",
-    r"\bstatement of work\b",
 ]
 
 DISCLAIMER_PATTERNS = [
