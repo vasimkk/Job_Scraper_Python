@@ -18,7 +18,11 @@ from rich.prompt import Prompt
 from scraper_agent.db.schema_manager import initialize_schema, seed_database
 from scraper_agent.db.connection import test_connection
 from scraper_agent.db.repository import JobRepository
-from scraper_agent.discovery.company_finder import TARGET_INDUSTRIES, normalize_industry_name
+from scraper_agent.discovery.company_finder import (
+    TARGET_INDUSTRIES,
+    SUPPORTED_ATS_PLATFORMS,
+    normalize_industry_name,
+)
 from scraper_agent.agent.scraper_agent import ScraperAgent
 from scraper_agent.classifiers.date_filter import format_freshness_window_description
 
@@ -72,7 +76,7 @@ def print_database_stats():
 
 
 def run_interactive_mode(enforce_date_window: bool = True):
-    """Interactive CLI menu to choose industry and run dynamic scraping."""
+    """Interactive CLI menu to choose industry, target ATS platforms, and run dynamic scraping."""
     console.print("\n[bold cyan]Select Target Industry for Dynamic Discovery:[/bold cyan]")
     console.print("  [bold green]0.[/bold green] ALL 7 Target Industries")
     for idx, ind in enumerate(TARGET_INDUSTRIES, 1):
@@ -96,8 +100,39 @@ def run_interactive_mode(enforce_date_window: bool = True):
     elif choice.strip():
         selected_industry = normalize_industry_name(choice.strip())
 
+    # ATS Platform Selection across industry targets
+    console.print("\n[bold cyan]Select Target ATS Platform for Industry Discovery:[/bold cyan]")
+    console.print("  [bold green]0.[/bold green] ALL Supported ATS Platforms (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Jobvite, Taleo, etc.)")
+    for idx, ats in enumerate(SUPPORTED_ATS_PLATFORMS[1:], 1):
+        console.print(f"  [bold green]{idx}.[/bold green] {ats}")
+
+    ats_choice = Prompt.ask(
+        "Enter ATS selection (number or name)",
+        default="0",
+    )
+    selected_ats = "ALL"
+    if ats_choice.isdigit():
+        c_idx = int(ats_choice)
+        if c_idx == 0:
+            selected_ats = "ALL"
+        elif 1 <= c_idx < len(SUPPORTED_ATS_PLATFORMS):
+            selected_ats = SUPPORTED_ATS_PLATFORMS[c_idx]
+    elif ats_choice.strip():
+        selected_ats = ats_choice.strip()
+
+    target_jobs_input = Prompt.ask(
+        "Enter Target Jobs Goal (e.g. 9000, 0 for unlimited)",
+        default="9000",
+    )
+    target_jobs = int(target_jobs_input) if target_jobs_input.isdigit() else 9000
+
     agent = ScraperAgent(enforce_date_window=enforce_date_window)
-    agent.start(target_industry=selected_industry, dynamic_discovery=True)
+    agent.start(
+        target_industry=selected_industry,
+        target_ats=selected_ats,
+        dynamic_discovery=True,
+        target_jobs=target_jobs,
+    )
 
 
 def main():
@@ -109,6 +144,13 @@ def main():
         "--industry",
         type=str,
         help="Target industry for dynamic discovery (e.g., 'Information Technology', 'Finance', 'Healthcare', 'Energy', 'Defense', 'ALL')",
+    )
+    parser.add_argument(
+        "-a",
+        "--ats",
+        type=str,
+        default="ALL",
+        help="Target ATS platform (e.g., 'Workday', 'Greenhouse', 'Lever', 'Ashby', 'SmartRecruiters', 'Jobvite', 'Taleo', 'ALL')",
     )
     parser.add_argument(
         "-c",
@@ -167,7 +209,7 @@ def main():
         "--target-jobs",
         type=int,
         default=0,
-        help="Target total number of jobs to store in the database (e.g. 1000)",
+        help="Target total number of jobs to store in the database (e.g. 9000)",
     )
     parser.add_argument(
         "--limit-per-industry",
@@ -218,7 +260,9 @@ def main():
                 target_industry=args.industry,
                 target_company=args.company,
                 target_url=args.url,
+                target_ats=args.ats,
                 dynamic_discovery=dynamic_disc,
+                target_jobs=args.target_jobs,
             )
             sleep_secs = args.interval * 3600
             console.print(f"[dim]Next daily scrape in {args.interval} hour(s). Sleeping...[/dim]")
@@ -233,6 +277,7 @@ def main():
         target_industry=args.industry,
         target_company=args.company,
         target_url=args.url,
+        target_ats=args.ats,
         dynamic_discovery=dynamic_disc,
         target_jobs=args.target_jobs,
         limit_per_industry=args.limit_per_industry,

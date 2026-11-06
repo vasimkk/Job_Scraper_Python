@@ -25,80 +25,264 @@ TARGET_INDUSTRIES = [
     "Pharma & Biotechnology",
 ]
 
-# Verified real corporate career portals for the 7 Target Industries
+# Supported ATS Platforms for Target Filtering
+SUPPORTED_ATS_PLATFORMS = [
+    "ALL",
+    "Workday",
+    "Greenhouse",
+    "Lever",
+    "Ashby",
+    "SmartRecruiters",
+    "Jobvite",
+    "Taleo",
+    "BambooHR",
+    "iCIMS",
+]
+
+
+def matches_ats(url: str, ats: Optional[str]) -> bool:
+    """Checks whether a URL matches a specified ATS platform filter."""
+    if not ats or ats.strip().upper() in ("ALL", ""):
+        return True
+    a = ats.strip().lower()
+    u = (url or "").lower()
+    if a in ("workday", "wd"):
+        return "myworkdayjobs.com" in u
+    if a == "greenhouse":
+        return "greenhouse.io" in u
+    if a == "lever":
+        return "lever.co" in u
+    if a == "ashby":
+        return "ashbyhq.com" in u
+    if a in ("smartrecruiters", "smart_recruiters"):
+        return "smartrecruiters.com" in u
+    if a == "jobvite":
+        return "jobvite.com" in u
+    if a == "taleo":
+        return "taleo.net" in u
+    if a == "bamboohr":
+        return "bamboohr.com" in u
+    if a == "icims":
+        return "icims.com" in u
+    return a in u
+
+
+# Verified real corporate career portals across all ATS platforms for the 7 Target Industries
 VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
     "IT, Software & Technology": [
-        {"name": "GitLab", "domain": "gitlab.com", "career_url": "https://about.gitlab.com/jobs"},
-        {"name": "Linear", "domain": "linear.app", "career_url": "https://linear.app/careers"},
-        {"name": "Figma", "domain": "figma.com", "career_url": "https://www.figma.com/careers"},
-        {"name": "Datadog", "domain": "datadoghq.com", "career_url": "https://www.datadoghq.com/careers"},
-        {"name": "Elastic", "domain": "elastic.co", "career_url": "https://www.elastic.co/about/careers"},
-        {"name": "Synthesia", "domain": "synthesia.io", "career_url": "https://www.synthesia.io/careers"},
-        {"name": "Vercel", "domain": "vercel.com", "career_url": "https://vercel.com/careers"},
-        {"name": "Stripe", "domain": "stripe.com", "career_url": "https://stripe.com/jobs"},
-        {"name": "GitHub", "domain": "github.com", "career_url": "https://github.com/about/careers"},
-        {"name": "Cloudflare", "domain": "cloudflare.com", "career_url": "https://www.cloudflare.com/careers/"},
-        {"name": "CrowdStrike", "domain": "crowdstrike.com", "career_url": "https://www.crowdstrike.com/careers/"},
+        # Workday CXS
+        {"name": "NVIDIA", "domain": "nvidia.com", "career_url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"},
+        {"name": "Salesforce", "domain": "salesforce.com", "career_url": "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site"},
+        {"name": "Adobe", "domain": "adobe.com", "career_url": "https://adobe.wd5.myworkdayjobs.com/external_experienced"},
+        {"name": "Workday", "domain": "workday.com", "career_url": "https://workday.wd5.myworkdayjobs.com/Workday"},
+        {"name": "Broadcom", "domain": "broadcom.com", "career_url": "https://broadcom.wd1.myworkdayjobs.com/External_Career"},
+        {"name": "Autodesk", "domain": "autodesk.com", "career_url": "https://autodesk.wd1.myworkdayjobs.com/Ext"},
+        # SmartRecruiters
+        {"name": "Square / Block", "domain": "squareup.com", "career_url": "https://jobs.smartrecruiters.com/Square"},
+        # Ashby
+        {"name": "OpenAI", "domain": "openai.com", "career_url": "https://jobs.ashbyhq.com/openai"},
+        {"name": "Linear", "domain": "linear.app", "career_url": "https://jobs.ashbyhq.com/linear"},
+        {"name": "Synthesia", "domain": "synthesia.io", "career_url": "https://jobs.ashbyhq.com/synthesia"},
+        # Lever
+        {"name": "Stripe", "domain": "stripe.com", "career_url": "https://jobs.lever.co/stripe"},
+        {"name": "Atlassian", "domain": "atlassian.com", "career_url": "https://jobs.lever.co/atlassian"},
+        {"name": "Palantir", "domain": "palantir.com", "career_url": "https://jobs.lever.co/palantir"},
+        {"name": "Dropbox", "domain": "dropbox.com", "career_url": "https://jobs.lever.co/dropbox"},
+        {"name": "Snyk", "domain": "snyk.io", "career_url": "https://jobs.lever.co/snyk"},
+        {"name": "Retool", "domain": "retool.com", "career_url": "https://jobs.lever.co/retool"},
+        {"name": "Zapier", "domain": "zapier.com", "career_url": "https://jobs.lever.co/zapier"},
+        # Greenhouse
+        {"name": "Databricks", "domain": "databricks.com", "career_url": "https://boards.greenhouse.io/databricks"},
+        {"name": "Figma", "domain": "figma.com", "career_url": "https://boards.greenhouse.io/figma"},
+        {"name": "Cloudflare", "domain": "cloudflare.com", "career_url": "https://boards.greenhouse.io/cloudflare"},
+        {"name": "Datadog", "domain": "datadoghq.com", "career_url": "https://boards.greenhouse.io/datadog"},
+        {"name": "Snowflake", "domain": "snowflake.com", "career_url": "https://boards.greenhouse.io/snowflake"},
+        {"name": "Reddit", "domain": "reddit.com", "career_url": "https://boards.greenhouse.io/reddit"},
+        {"name": "Roblox", "domain": "roblox.com", "career_url": "https://boards.greenhouse.io/roblox"},
+        {"name": "Pure Storage", "domain": "purestorage.com", "career_url": "https://boards.greenhouse.io/purestorage"},
+        {"name": "MongoDB", "domain": "mongodb.com", "career_url": "https://boards.greenhouse.io/mongodb"},
+        {"name": "Okta", "domain": "okta.com", "career_url": "https://boards.greenhouse.io/okta"},
+        {"name": "Twilio", "domain": "twilio.com", "career_url": "https://boards.greenhouse.io/twilio"},
+        {"name": "Box", "domain": "box.com", "career_url": "https://boards.greenhouse.io/box"},
+        {"name": "GitLab", "domain": "gitlab.com", "career_url": "https://boards.greenhouse.io/gitlab"},
+        {"name": "Elastic", "domain": "elastic.co", "career_url": "https://boards.greenhouse.io/elastic"},
+        {"name": "Vercel", "domain": "vercel.com", "career_url": "https://boards.greenhouse.io/vercel"},
+        {"name": "Scale AI", "domain": "scale.com", "career_url": "https://boards.greenhouse.io/scaleai"},
+        {"name": "Gusto", "domain": "gusto.com", "career_url": "https://boards.greenhouse.io/gusto"},
+        {"name": "Pinterest", "domain": "pinterest.com", "career_url": "https://boards.greenhouse.io/pinterest"},
+        {"name": "HashiCorp", "domain": "hashicorp.com", "career_url": "https://boards.greenhouse.io/hashicorp"},
+        {"name": "Cockroach Labs", "domain": "cockroachlabs.com", "career_url": "https://boards.greenhouse.io/cockroachlabs"},
+        {"name": "Postman", "domain": "postman.com", "career_url": "https://boards.greenhouse.io/postman"},
+        {"name": "Grafana Labs", "domain": "grafana.com", "career_url": "https://boards.greenhouse.io/grafanalabs"},
+        {"name": "dbt Labs", "domain": "getdbt.com", "career_url": "https://boards.greenhouse.io/getdbt"},
     ],
     "Healthcare": [
-        {"name": "Oscar Health", "domain": "hioscar.com", "career_url": "https://www.hioscar.com/careers"},
-        {"name": "Doximity", "domain": "doximity.com", "career_url": "https://www.doximity.com/careers"},
-        {"name": "Komodo Health", "domain": "komodohealth.com", "career_url": "https://www.komodohealth.com/careers"},
-        {"name": "BetterHelp", "domain": "betterhelp.com", "career_url": "https://www.betterhelp.com/careers/"},
-        {"name": "Wheel", "domain": "wheel.com", "career_url": "https://www.wheel.com/careers"},
-        {"name": "Abby Care", "domain": "abbycare.org", "career_url": "https://www.abbycare.org/careers"},
-        {"name": "Datavant", "domain": "datavant.com", "career_url": "https://datavant.com/careers"},
-        {"name": "Ro", "domain": "ro.co", "career_url": "https://ro.co/careers"},
-        {"name": "Teladoc Health", "domain": "teladochealth.com", "career_url": "https://www.teladochealth.com/about/careers/"},
-        {"name": "GoodRx", "domain": "goodrx.com", "career_url": "https://www.goodrx.com/corporate/careers"},
+        # Workday CXS
+        {"name": "Humana", "domain": "humana.com", "career_url": "https://humana.wd5.myworkdayjobs.com/Humana_External_Career_Site"},
+        {"name": "Medtronic", "domain": "medtronic.com", "career_url": "https://medtronic.wd1.myworkdayjobs.com/MedtronicCareers"},
+        {"name": "Stryker", "domain": "stryker.com", "career_url": "https://stryker.wd1.myworkdayjobs.com/StrykerCareers"},
+        {"name": "Danaher", "domain": "danaher.com", "career_url": "https://danaher.wd1.myworkdayjobs.com/DanaherJobs"},
+        # SmartRecruiters
+        {"name": "Catholic Health", "domain": "chsbuffalo.org", "career_url": "https://jobs.smartrecruiters.com/CatholicHealth"},
+        # Jobvite
+        {"name": "Zocdoc", "domain": "zocdoc.com", "career_url": "https://jobs.jobvite.com/zocdoc"},
+        {"name": "Health Catalyst", "domain": "healthcatalyst.com", "career_url": "https://jobs.jobvite.com/healthcatalyst"},
+        {"name": "Premier Inc", "domain": "premierinc.com", "career_url": "https://jobs.jobvite.com/premierinc"},
+        # Taleo
+        {"name": "Encompass Health", "domain": "encompasshealth.com", "career_url": "https://encompasshealth.taleo.net/careersection/2/jobsearch.ftl"},
+        # Ashby
+        {"name": "Headway", "domain": "headway.co", "career_url": "https://jobs.ashbyhq.com/headway"},
+        {"name": "Abby Care", "domain": "abbycare.org", "career_url": "https://jobs.ashbyhq.com/abbycare"},
+        # Lever
+        {"name": "Color Health", "domain": "color.com", "career_url": "https://jobs.lever.co/color"},
+        {"name": "Forward Health", "domain": "goforward.com", "career_url": "https://jobs.lever.co/forward"},
+        # Greenhouse
+        {"name": "Oscar Health", "domain": "hioscar.com", "career_url": "https://boards.greenhouse.io/oscar"},
+        {"name": "Komodo Health", "domain": "komodohealth.com", "career_url": "https://boards.greenhouse.io/komodohealth"},
+        {"name": "Tempus AI", "domain": "tempus.com", "career_url": "https://boards.greenhouse.io/tempus"},
+        {"name": "Ro", "domain": "ro.co", "career_url": "https://boards.greenhouse.io/ro"},
+        {"name": "Datavant", "domain": "datavant.com", "career_url": "https://boards.greenhouse.io/datavant"},
+        {"name": "GoodRx", "domain": "goodrx.com", "career_url": "https://boards.greenhouse.io/goodrx"},
+        {"name": "Hinge Health", "domain": "hingehealth.com", "career_url": "https://boards.greenhouse.io/hingehealth"},
+        {"name": "Maven Clinic", "domain": "mavenclinic.com", "career_url": "https://boards.greenhouse.io/mavenclinic"},
+        {"name": "Flatiron Health", "domain": "flatiron.com", "career_url": "https://boards.greenhouse.io/flatironhealth"},
+        {"name": "Cedar", "domain": "cedar.com", "career_url": "https://boards.greenhouse.io/cedar"},
+        {"name": "Lyra Health", "domain": "lyrahealth.com", "career_url": "https://boards.greenhouse.io/lyrahealth"},
+        {"name": "Omada Health", "domain": "omadahealth.com", "career_url": "https://boards.greenhouse.io/omadahealth"},
+        {"name": "Clover Health", "domain": "cloverhealth.com", "career_url": "https://boards.greenhouse.io/cloverhealth"},
+        {"name": "HealthVerity", "domain": "healthverity.com", "career_url": "https://boards.greenhouse.io/healthverity"},
+        {"name": "SonderMind", "domain": "sondermind.com", "career_url": "https://boards.greenhouse.io/sondermind"},
+        {"name": "Wheel", "domain": "wheel.com", "career_url": "https://boards.greenhouse.io/wheel"},
+        {"name": "BetterHelp", "domain": "betterhelp.com", "career_url": "https://boards.greenhouse.io/betterhelp"},
+        {"name": "Doximity", "domain": "doximity.com", "career_url": "https://boards.greenhouse.io/doximity"},
     ],
     "Finance & Banking": [
-        {"name": "Robinhood", "domain": "robinhood.com", "career_url": "https://robinhood.com/careers"},
-        {"name": "Coinbase", "domain": "coinbase.com", "career_url": "https://www.coinbase.com/careers"},
-        {"name": "Ramp", "domain": "ramp.com", "career_url": "https://ramp.com/careers"},
-        {"name": "Wealthfront", "domain": "wealthfront.com", "career_url": "https://wealthfront.com/careers"},
-        {"name": "Plaid", "domain": "plaid.com", "career_url": "https://plaid.com/careers"},
-        {"name": "Brex", "domain": "brex.com", "career_url": "https://www.brex.com/careers"},
-        {"name": "Affirm", "domain": "affirm.com", "career_url": "https://www.affirm.com/careers"},
-        {"name": "Block", "domain": "block.xyz", "career_url": "https://block.xyz/careers"},
-        {"name": "Chime", "domain": "chime.com", "career_url": "https://www.chime.com/careers/"},
-        {"name": "SoFi", "domain": "sofi.com", "career_url": "https://www.sofi.com/careers/"},
+        # Workday CXS
+        {"name": "US Bank", "domain": "usbank.com", "career_url": "https://usbank.wd1.myworkdayjobs.com/US_Bank_Careers"},
+        # SmartRecruiters
+        {"name": "Visa", "domain": "visa.com", "career_url": "https://jobs.smartrecruiters.com/Visa"},
+        # Ashby
+        {"name": "Ramp", "domain": "ramp.com", "career_url": "https://jobs.ashbyhq.com/ramp"},
+        # Lever
+        {"name": "Block", "domain": "block.xyz", "career_url": "https://jobs.lever.co/block"},
+        {"name": "Plaid", "domain": "plaid.com", "career_url": "https://jobs.lever.co/plaid"},
+        {"name": "Blend", "domain": "blend.com", "career_url": "https://jobs.lever.co/blend"},
+        # Greenhouse
+        {"name": "Robinhood", "domain": "robinhood.com", "career_url": "https://boards.greenhouse.io/robinhood"},
+        {"name": "Coinbase", "domain": "coinbase.com", "career_url": "https://boards.greenhouse.io/coinbase"},
+        {"name": "Brex", "domain": "brex.com", "career_url": "https://boards.greenhouse.io/brex"},
+        {"name": "Affirm", "domain": "affirm.com", "career_url": "https://boards.greenhouse.io/affirm"},
+        {"name": "Upstart", "domain": "upstart.com", "career_url": "https://boards.greenhouse.io/upstart"},
+        {"name": "Chime", "domain": "chime.com", "career_url": "https://boards.greenhouse.io/chime"},
+        {"name": "SoFi", "domain": "sofi.com", "career_url": "https://boards.greenhouse.io/sofi"},
+        {"name": "Wealthfront", "domain": "wealthfront.com", "career_url": "https://boards.greenhouse.io/wealthfront"},
+        {"name": "Carta", "domain": "carta.com", "career_url": "https://boards.greenhouse.io/carta"},
+        {"name": "Marqeta", "domain": "marqeta.com", "career_url": "https://boards.greenhouse.io/marqeta"},
+        {"name": "Toast", "domain": "toasttab.com", "career_url": "https://boards.greenhouse.io/toast"},
+        {"name": "Addepar", "domain": "addepar.com", "career_url": "https://boards.greenhouse.io/addepar"},
+        {"name": "Stash", "domain": "stash.com", "career_url": "https://boards.greenhouse.io/stash"},
+        {"name": "Chainalysis", "domain": "chainalysis.com", "career_url": "https://boards.greenhouse.io/chainalysis"},
+        {"name": "Ripple", "domain": "ripple.com", "career_url": "https://boards.greenhouse.io/ripple"},
+        {"name": "Gemini", "domain": "gemini.com", "career_url": "https://boards.greenhouse.io/gemini"},
+        {"name": "Circle", "domain": "circle.com", "career_url": "https://boards.greenhouse.io/circle"},
+        {"name": "Apex Fintech", "domain": "apexfintechsolutions.com", "career_url": "https://boards.greenhouse.io/apexfintechsolutions"},
     ],
     "Insurance": [
-        {"name": "Lemonade", "domain": "lemonade.com", "career_url": "https://www.lemonade.com/careers"},
-        {"name": "Root Insurance", "domain": "joinroot.com", "career_url": "https://www.joinroot.com/careers/"},
-        {"name": "Hippo Insurance", "domain": "hippo.com", "career_url": "https://www.hippo.com/careers"},
-        {"name": "Policygenius", "domain": "policygenius.com", "career_url": "https://www.policygenius.com/careers/"},
-        {"name": "Kin Insurance", "domain": "kin.com", "career_url": "https://www.kin.com/careers/"},
-        {"name": "Next Insurance", "domain": "nextinsurance.com", "career_url": "https://www.nextinsurance.com/careers/"},
+        # Workday CXS
+        {"name": "Travelers", "domain": "travelers.com", "career_url": "https://travelers.wd5.myworkdayjobs.com/External"},
+        # Lever
+        {"name": "Coalition", "domain": "coalitioninc.com", "career_url": "https://jobs.lever.co/coalition"},
+        {"name": "Cowbell Cyber", "domain": "cowbell.insure", "career_url": "https://jobs.lever.co/cowbellcyber"},
+        {"name": "Branch Insurance", "domain": "ourbranch.com", "career_url": "https://jobs.lever.co/ourbranch"},
+        # Greenhouse
+        {"name": "Lemonade", "domain": "lemonade.com", "career_url": "https://boards.greenhouse.io/lemonade"},
+        {"name": "Root Insurance", "domain": "joinroot.com", "career_url": "https://boards.greenhouse.io/joinroot"},
+        {"name": "Hippo Insurance", "domain": "hippo.com", "career_url": "https://boards.greenhouse.io/hippo"},
+        {"name": "Policygenius", "domain": "policygenius.com", "career_url": "https://boards.greenhouse.io/policygenius"},
+        {"name": "Kin Insurance", "domain": "kin.com", "career_url": "https://boards.greenhouse.io/kininsurance"},
+        {"name": "Next Insurance", "domain": "nextinsurance.com", "career_url": "https://boards.greenhouse.io/nextinsurance"},
+        {"name": "Pie Insurance", "domain": "pieinsurance.com", "career_url": "https://boards.greenhouse.io/pieinsurance"},
+        {"name": "Clearcover", "domain": "clearcover.com", "career_url": "https://boards.greenhouse.io/clearcover"},
+        {"name": "Ethos Life", "domain": "ethoslife.com", "career_url": "https://boards.greenhouse.io/ethoslife"},
+        {"name": "Corvus Insurance", "domain": "corvusinsurance.com", "career_url": "https://boards.greenhouse.io/corvus"},
+        {"name": "Openly", "domain": "openly.com", "career_url": "https://boards.greenhouse.io/openly"},
+        {"name": "At-Bay", "domain": "at-bay.com", "career_url": "https://boards.greenhouse.io/atbay"},
+        {"name": "AgentSync", "domain": "agentsync.io", "career_url": "https://boards.greenhouse.io/agentsync"},
     ],
     "Solar, Energy & Utilities": [
-        {"name": "ChargePoint", "domain": "chargepoint.com", "career_url": "https://www.chargepoint.com/careers"},
-        {"name": "Palmetto", "domain": "palmetto.com", "career_url": "https://palmetto.com/careers"},
-        {"name": "Sunrun", "domain": "sunrun.com", "career_url": "https://careers.sunrun.com/"},
-        {"name": "Enphase Energy", "domain": "enphase.com", "career_url": "https://enphase.com/careers"},
-        {"name": "Form Energy", "domain": "formenergy.com", "career_url": "https://formenergy.com/careers"},
-        {"name": "Rivian", "domain": "rivian.com", "career_url": "https://rivian.com/careers"},
-        {"name": "Aurora Solar", "domain": "aurorasolar.com", "career_url": "https://aurorasolar.com/careers/"},
+        # SmartRecruiters
+        {"name": "Schneider Electric", "domain": "se.com", "career_url": "https://jobs.smartrecruiters.com/SchneiderElectric"},
+        # Lever
+        {"name": "Span", "domain": "span.io", "career_url": "https://jobs.lever.co/span"},
+        {"name": "Fluence Energy", "domain": "fluenceenergy.com", "career_url": "https://jobs.lever.co/fluence"},
+        {"name": "Crusoe Energy", "domain": "crusoeenergy.com", "career_url": "https://jobs.lever.co/crusoeenergy"},
+        {"name": "Ample", "domain": "ample.com", "career_url": "https://jobs.lever.co/ample"},
+        {"name": "Electric Hydrogen", "domain": "eh2.com", "career_url": "https://jobs.lever.co/eh2"},
+        # Greenhouse
+        {"name": "Redwood Materials", "domain": "redwoodmaterials.com", "career_url": "https://boards.greenhouse.io/redwoodmaterials"},
+        {"name": "Form Energy", "domain": "formenergy.com", "career_url": "https://boards.greenhouse.io/formenergy"},
+        {"name": "Aurora Solar", "domain": "aurorasolar.com", "career_url": "https://boards.greenhouse.io/aurorasolar"},
+        {"name": "ChargePoint", "domain": "chargepoint.com", "career_url": "https://boards.greenhouse.io/chargepoint"},
+        {"name": "Palmetto", "domain": "palmetto.com", "career_url": "https://boards.greenhouse.io/palmetto"},
+        {"name": "Stem Inc", "domain": "stem.com", "career_url": "https://boards.greenhouse.io/steminc"},
+        {"name": "Solaria", "domain": "solaria.com", "career_url": "https://boards.greenhouse.io/solaria"},
+        {"name": "LevelTen Energy", "domain": "leveltenenergy.com", "career_url": "https://boards.greenhouse.io/leveltenenergy"},
+        {"name": "Arcadia", "domain": "arcadia.com", "career_url": "https://boards.greenhouse.io/arcadia"},
+        {"name": "Sunnova", "domain": "sunnova.com", "career_url": "https://boards.greenhouse.io/sunnova"},
+        {"name": "Nextracker", "domain": "nextracker.com", "career_url": "https://boards.greenhouse.io/nextracker"},
     ],
     "Aerospace & Defense": [
-        {"name": "Anduril Industries", "domain": "anduril.com", "career_url": "https://www.anduril.com/careers"},
-        {"name": "Palantir Technologies", "domain": "palantir.com", "career_url": "https://www.palantir.com/careers/"},
-        {"name": "SpaceX", "domain": "spacex.com", "career_url": "https://www.spacex.com/careers/"},
-        {"name": "Planet Labs", "domain": "planet.com", "career_url": "https://www.planet.com/careers/"},
-        {"name": "Astranis", "domain": "astranis.com", "career_url": "https://www.astranis.com/careers"},
-        {"name": "Relativity Space", "domain": "relativityspace.com", "career_url": "https://www.relativityspace.com/careers"},
-        {"name": "Shield AI", "domain": "shield.ai", "career_url": "https://shield.ai/careers/"},
+        # Workday CXS
+        {"name": "Boeing", "domain": "boeing.com", "career_url": "https://boeing.wd1.myworkdayjobs.com/EXTERNAL_CAREERS"},
+        # Ashby
+        {"name": "Apex Space", "domain": "apextechnology.com", "career_url": "https://jobs.ashbyhq.com/apex"},
+        # Lever
+        {"name": "Anduril Industries", "domain": "anduril.com", "career_url": "https://jobs.lever.co/anduril"},
+        {"name": "Astranis", "domain": "astranis.com", "career_url": "https://jobs.lever.co/astranis"},
+        {"name": "Shield AI", "domain": "shield.ai", "career_url": "https://jobs.lever.co/shieldai"},
+        {"name": "Relativity Space", "domain": "relativityspace.com", "career_url": "https://jobs.lever.co/relativityspace"},
+        {"name": "Skydio", "domain": "skydio.com", "career_url": "https://jobs.lever.co/skydio"},
+        {"name": "Epirus", "domain": "epirusinc.com", "career_url": "https://jobs.lever.co/epirus"},
+        {"name": "Hermeus", "domain": "hermeus.com", "career_url": "https://jobs.lever.co/hermeus"},
+        {"name": "Varda Space Industries", "domain": "varda.com", "career_url": "https://jobs.lever.co/varda"},
+        {"name": "Joby Aviation", "domain": "jobyaviation.com", "career_url": "https://jobs.lever.co/jobyaviation"},
+        {"name": "Stoke Space", "domain": "stokespace.com", "career_url": "https://jobs.lever.co/stokespace"},
+        {"name": "Ursa Major", "domain": "ursamajor.com", "career_url": "https://jobs.lever.co/ursamajor"},
+        {"name": "Palantir Technologies", "domain": "palantir.com", "career_url": "https://jobs.lever.co/palantir"},
+        # Greenhouse
+        {"name": "Rocket Lab", "domain": "rocketlabusa.com", "career_url": "https://boards.greenhouse.io/rocketlab"},
+        {"name": "Two Six Technologies", "domain": "twosixtech.com", "career_url": "https://boards.greenhouse.io/twosixtechnologies"},
+        {"name": "BlackSky Technology", "domain": "blacksky.com", "career_url": "https://boards.greenhouse.io/blacksky"},
+        {"name": "Planet Labs", "domain": "planet.com", "career_url": "https://boards.greenhouse.io/planetlabs"},
+        {"name": "Archer Aviation", "domain": "archer.com", "career_url": "https://boards.greenhouse.io/archer"},
+        {"name": "HawkEye 360", "domain": "he360.com", "career_url": "https://boards.greenhouse.io/hawkeye360"},
+        {"name": "SpaceX", "domain": "spacex.com", "career_url": "https://boards.greenhouse.io/spacex"},
+        {"name": "Applied Intuition", "domain": "appliedintuition.com", "career_url": "https://boards.greenhouse.io/appliedintuition"},
+        {"name": "True Anomaly", "domain": "trueanomaly.com", "career_url": "https://boards.greenhouse.io/trueanomaly"},
     ],
     "Pharma & Biotechnology": [
-        {"name": "Moderna", "domain": "modernatx.com", "career_url": "https://modernatx.eightfold.ai/careers"},
-        {"name": "Regeneron", "domain": "regeneron.com", "career_url": "https://careers.regeneron.com/"},
-        {"name": "BioNTech", "domain": "biontech.com", "career_url": "https://biontech.com/int/en/home/careers.html"},
-        {"name": "Vertex Pharmaceuticals", "domain": "vrtx.com", "career_url": "https://www.vrtx.com/careers/"},
-        {"name": "Recursion Pharmaceuticals", "domain": "recursion.com", "career_url": "https://www.recursion.com/careers"},
-        {"name": "Ginkgo Bioworks", "domain": "ginkgobioworks.com", "career_url": "https://www.ginkgobioworks.com/careers/"},
-        {"name": "Tempus AI", "domain": "tempus.com", "career_url": "https://www.tempus.com/careers/"},
-        {"name": "Illumina", "domain": "illumina.com", "career_url": "https://www.illumina.com/company/careers.html"},
+        # Workday CXS
+        {"name": "Amgen", "domain": "amgen.com", "career_url": "https://amgen.wd1.myworkdayjobs.com/Careers"},
+        {"name": "Pfizer", "domain": "pfizer.com", "career_url": "https://pfizer.wd1.myworkdayjobs.com/PfizerCareers"},
+        {"name": "Gilead Sciences", "domain": "gilead.com", "career_url": "https://gilead.wd1.myworkdayjobs.com/gileadcareers"},
+        {"name": "Illumina", "domain": "illumina.com", "career_url": "https://illumina.wd1.myworkdayjobs.com/illumina-careers"},
+        # Lever
+        {"name": "Insitro", "domain": "insitro.com", "career_url": "https://jobs.lever.co/insitro"},
+        {"name": "Altos Labs", "domain": "altoslabs.com", "career_url": "https://jobs.lever.co/altoslabs"},
+        {"name": "Arsenal Biosciences", "domain": "arsenalbio.com", "career_url": "https://jobs.lever.co/arsenalbio"},
+        {"name": "Graphite Bio", "domain": "graphitebio.com", "career_url": "https://jobs.lever.co/graphitebio"},
+        # Greenhouse
+        {"name": "Ginkgo Bioworks", "domain": "ginkgobioworks.com", "career_url": "https://boards.greenhouse.io/ginkgobioworks"},
+        {"name": "Twist Bioscience", "domain": "twistbioscience.com", "career_url": "https://boards.greenhouse.io/twistbioscience"},
+        {"name": "Prime Medicine", "domain": "primemedicine.com", "career_url": "https://boards.greenhouse.io/primemedicine"},
+        {"name": "Beam Therapeutics", "domain": "beamtx.com", "career_url": "https://boards.greenhouse.io/beamtherapeutics"},
+        {"name": "Recursion Pharmaceuticals", "domain": "recursion.com", "career_url": "https://boards.greenhouse.io/recursionpharma"},
+        {"name": "Tempus AI", "domain": "tempus.com", "career_url": "https://boards.greenhouse.io/tempus"},
+        {"name": "Resilience", "domain": "resilience.com", "career_url": "https://boards.greenhouse.io/resilience"},
+        {"name": "10x Genomics", "domain": "10xgenomics.com", "career_url": "https://boards.greenhouse.io/10xgenomics"},
+        {"name": "Mammoth Biosciences", "domain": "mammoth.bio", "career_url": "https://boards.greenhouse.io/mammothbiosci"},
+        {"name": "Sana Biotechnology", "domain": "sana.com", "career_url": "https://boards.greenhouse.io/sanabiotechnology"},
+        {"name": "Relay Therapeutics", "domain": "relaytx.com", "career_url": "https://boards.greenhouse.io/relaytx"},
     ],
 }
 
@@ -162,27 +346,18 @@ class DynamicJobDiscovery:
         return company, source, raw_jobs
 
     def find_companies_in_industry(
-        self, industry: str, company_filter: Optional[str] = None
+        self, industry: str, company_filter: Optional[str] = None, ats_filter: Optional[str] = None
     ) -> List[Tuple[Company, JobSource]]:
         """
         Flow Step 3: Find Companies in Industry.
         Retrieves companies belonging to the identified industry, along with their active career page sources.
         Automatically registers verified companies into PostgreSQL on-the-fly without needing seed_data.sql.
+        Filters by ATS platform if ats_filter is specified.
         """
         ind_clean = normalize_industry_name(industry)
 
-        # 1. Check if matching companies already exist in the database
-        matched_companies: List[Company] = []
-        if company_filter:
-            comp = self.repo.get_company_by_name(company_filter)
-            if comp:
-                matched_companies.append(comp)
-        else:
-            matched_companies = self.repo.get_companies_by_industry(ind_clean)
-
-        # 2. If no companies exist in DB for this industry, dynamically populate from verified directory
-        if not matched_companies and ind_clean in VERIFIED_INDUSTRY_COMPANIES:
-            logger.info(f"Registering verified companies for industry '{ind_clean}' in database...")
+        # 1. Ensure all verified high-yield companies for this industry are registered and active in PostgreSQL
+        if ind_clean in VERIFIED_INDUSTRY_COMPANIES:
             for comp_info in VERIFIED_INDUSTRY_COMPANIES[ind_clean]:
                 comp = self.repo.get_or_create_company(
                     name=comp_info["name"],
@@ -195,15 +370,27 @@ class DynamicJobDiscovery:
                     source_url=comp_info["career_url"],
                     scraper_type="playwright",
                 )
+
+        # 2. Retrieve matched companies from the database
+        matched_companies: List[Company] = []
+        if company_filter:
+            comp = self.repo.get_company_by_name(company_filter)
+            if comp:
+                matched_companies.append(comp)
+        else:
             matched_companies = self.repo.get_companies_by_industry(ind_clean)
 
-        # 3. Build (Company, JobSource) pairs
-        results: List[Tuple[Company, JobSource]] = []
+        # 3. Build (Company, JobSource) pairs and prioritize high-yield ATS sources first
+        verified_names = {c["name"].lower() for c in VERIFIED_INDUSTRY_COMPANIES.get(ind_clean, [])}
+        verified_results: List[Tuple[Company, JobSource]] = []
+        other_results: List[Tuple[Company, JobSource]] = []
+
         for comp in matched_companies:
             sources = self.repo.get_active_sources_for_company(comp.id)
+            pair = None
             for src in sources:
                 if src.scraper_type == "playwright" or "career" in src.source_url or "job" in src.source_url:
-                    results.append((comp, src))
+                    pair = (comp, src)
                     break
             else:
                 if comp.career_url:
@@ -212,9 +399,23 @@ class DynamicJobDiscovery:
                         source_url=comp.career_url,
                         scraper_type="playwright",
                     )
-                    results.append((comp, src))
+                    pair = (comp, src)
 
-        return results
+            if pair:
+                if ats_filter and ats_filter.upper() != "ALL":
+                    if not matches_ats(pair[1].source_url, ats_filter):
+                        continue
+
+                if comp.name.lower() in verified_names or any(ats in pair[1].source_url for ats in [
+                    "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com",
+                    "smartrecruiters.com", "bamboohr.com", "jobvite.com", "icims.com", "taleo.net"
+                ]):
+                    verified_results.append(pair)
+                else:
+                    other_results.append(pair)
+
+        # Prioritize verified high-yield ATS boards first, followed by others
+        return verified_results + other_results
 
     def identify_posted_jobs(
         self, source: JobSource, max_jobs: int = 50

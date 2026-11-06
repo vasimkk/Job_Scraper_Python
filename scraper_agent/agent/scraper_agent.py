@@ -1,5 +1,6 @@
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -95,16 +96,19 @@ class ScraperAgent:
         target_industry: Optional[str] = None,
         target_company: Optional[str] = None,
         target_url: Optional[str] = None,
+        target_ats: Optional[str] = None,
         dynamic_discovery: bool = True,
         target_jobs: int = 0,
         limit_per_industry: int = 0,
     ) -> Dict[str, Any]:
         """Entry point that initializes and executes the complete agent workflow."""
+        ats_desc = target_ats.upper() if target_ats else "ALL Supported ATS Platforms"
         console.print(
             Panel.fit(
                 "[bold cyan]AutoJobApply – Dynamic Scraper Agent (Playwright Career Scraper)[/bold cyan]\n"
                 "[dim]Workflow: Identify Industry -> Find Companies -> Identify Posted Jobs (Prev+Current Month) -> "
-                "Tech Nature -> Check DB & Classify (Full-Time/Contract) -> Scrape Details -> Store in DB[/dim]",
+                "Tech Nature -> Check DB & Classify (Full-Time/Contract) -> Scrape Details -> Store in DB[/dim]\n"
+                f"[bold magenta]Target ATS Platforms:[/bold magenta] [yellow]{ats_desc}[/yellow]",
                 border_style="cyan",
             )
         )
@@ -132,18 +136,18 @@ class ScraperAgent:
                     console.print(f"\n[bold green]🎯 Target Goal Reached:[/bold green] {summary['total_jobs']} jobs stored in PostgreSQL!")
                     return self.end()
 
-            console.print(f"\n[bold green]▶ Step 2 (Identify Industry):[/bold green] Target Industry: [bold yellow]{industry}[/bold yellow]")
+            console.print(f"\n[bold green]▶ Step 2 (Identify Industry):[/bold green] Target Industry: [bold yellow]{industry}[/bold yellow] | ATS: [cyan]{ats_desc}[/cyan]")
 
             # Step 3: Find Companies in Industry
             companies_and_sources = self.find_companies_in_industry(
-                industry, company_filter=target_company
+                industry, company_filter=target_company, ats_filter=target_ats
             )
             console.print(
                 f"[bold green]▶ Step 3 (Find Companies in Industry):[/bold green] Found [bold cyan]{len(companies_and_sources)}[/bold cyan] company(s) with career pages in [yellow]{industry}[/yellow]."
             )
 
             if not companies_and_sources:
-                console.print(f"  [dim]No companies found for industry '{industry}'. Proceeding...[/dim]")
+                console.print(f"  [dim]No companies found for industry '{industry}' matching ATS '{ats_desc}'. Proceeding...[/dim]")
                 continue
 
             active_co_list = companies_and_sources[:limit_per_industry] if limit_per_industry > 0 else companies_and_sources
@@ -181,13 +185,13 @@ class ScraperAgent:
 
     # Step 3: Find Companies in Industry
     def find_companies_in_industry(
-        self, industry: str, company_filter: Optional[str] = None
+        self, industry: str, company_filter: Optional[str] = None, ats_filter: Optional[str] = None
     ) -> List[Tuple[Company, JobSource]]:
         """
         Flow Step 3: Queries the database and dynamic discovery to find active companies
         operating in the identified industry along with their direct career page sources.
         """
-        return self.discovery.find_companies_in_industry(industry, company_filter=company_filter)
+        return self.discovery.find_companies_in_industry(industry, company_filter=company_filter, ats_filter=ats_filter)
 
     def _process_company(self, company: Company, source: JobSource) -> None:
         """Executes steps 4 through 8 for a company and its career page source."""
@@ -336,28 +340,48 @@ class ScraperAgent:
                 f"  [bold green]▶ Step 7 (Scrape Job Details):[/bold green] Fetching full JD descriptions, deducing Tech Roles & attributes for {len(target_classified)} Full-Time & Contract jobs..."
             )
 
-            for raw_job, tech_kw, emp_type in target_classified:
-                # Flow Step 7: Always fetch deep job details (full JD, full location, real title) from the job page
-                desc = raw_job.raw_description
+            # Filter out jobs already in DB
+            new_candidate_jobs = [
+                (r, k, e) for r, k, e in target_classified
+                if r.external_job_id not in db_existing_map
+                and not ("boards.greenhouse.io/company/" in (r.job_url or ""))
+            ]
+
+            # Identify jobs requiring deep fetch
+            needs_deep_jobs = []
+            for raw_job, tech_kw, emp_type in new_candidate_jobs:
+                desc = raw_job.raw_description or ""
                 if raw_job.job_url and raw_job.job_url.startswith("http"):
-                    # Malformed greenhouse /company/ check: immediately reject
-                    if "boards.greenhouse.io/company/" in raw_job.job_url:
-                        logger.warning(f"Rejecting malformed job URL: {raw_job.job_url}")
-                        continue
+                    if (
+                        len(desc) < 150
+                        or not raw_job.raw_location
+                        or raw_job.raw_location.lower() in ["remote", "hybrid", "onsite", "unspecified", "none", ""]
+                        or raw_job.title.lower() in ["apply", "apply now", "view job"]
+                        or len(raw_job.title) < 5
+                    ):
+                        needs_deep_jobs.append(raw_job)
 
-                    deep_info = BaseScraper.fetch_job_deep_info(raw_job.job_url)
+            # Fast concurrent deep-fetching using ThreadPoolExecutor
+            deep_info_map = {}
+            if needs_deep_jobs:
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    url_list = [j.job_url for j in needs_deep_jobs]
+                    fetched_infos = list(executor.map(BaseScraper.fetch_job_deep_info, url_list))
+                    for j, info in zip(needs_deep_jobs, fetched_infos):
+                        deep_info_map[j.job_url] = info
 
-                    # USER REQUIREMENT: Store ONLY active and available URLs (reject 404, 'Sorry, but we can't find that page', expired)
+            for raw_job, tech_kw, emp_type in new_candidate_jobs:
+                desc = raw_job.raw_description or ""
+                if raw_job.job_url in deep_info_map:
+                    deep_info = deep_info_map[raw_job.job_url]
                     if not deep_info.get("is_active", True):
                         logger.warning(f"Skipping inactive/404 job posting: {raw_job.title} ({raw_job.job_url})")
                         continue
-
                     if deep_info.get("description") and len(deep_info["description"]) > len(desc):
                         desc = deep_info["description"]
                         raw_job.raw_description = desc
                     if deep_info.get("location"):
                         deep_loc = deep_info["location"].strip()
-                        # If current location is generic (Remote, Hybrid, empty) or deep location is more detailed
                         if not raw_job.raw_location or raw_job.raw_location.lower() in ["remote", "hybrid", "onsite", "unspecified", "none", ""]:
                             raw_job.raw_location = deep_loc
                         elif any(intl in deep_loc.lower() for intl in ["india", "bengaluru", "hyderabad", "karnataka", "telangana", "pune", "uk", "london", "canada"]):

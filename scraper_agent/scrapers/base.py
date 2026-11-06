@@ -196,6 +196,98 @@ class BaseScraper(ABC):
                 except Exception:
                     pass
 
+        # 2. Official Lever API handler
+        if "jobs.lever.co/" in job_url:
+            lev_m = re.search(r"jobs\.lever\.co/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)", job_url)
+            if lev_m:
+                slug, jid = lev_m.group(1), lev_m.group(2)
+                try:
+                    api_u = f"https://api.lever.co/v0/postings/{slug}/{jid}"
+                    r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent}, timeout=5)
+                    if r.status_code == 200:
+                        data = r.json()
+                        result["is_active"] = True
+                        result["title"] = (data.get("text") or "").strip()
+                        cats = data.get("categories") or {}
+                        result["location"] = cats.get("location") or data.get("workplaceType") or ""
+                        result["employment_type"] = cats.get("commitment") or ""
+                        desc_plain = data.get("descriptionPlain") or ""
+                        desc_html = data.get("description") or ""
+                        desc = desc_plain if desc_plain else BaseScraper.clean_html(desc_html)
+                        lists = data.get("lists") or []
+                        for lst in lists:
+                            hdr = lst.get("text") or ""
+                            content = BaseScraper.clean_html(lst.get("content") or "")
+                            if hdr or content:
+                                desc += f"\n\n{hdr}:\n{content}"
+                        result["description"] = desc.strip()
+                        return result
+                    elif r.status_code == 404:
+                        result["is_active"] = False
+                        return result
+                except Exception:
+                    pass
+
+        # 3. Workday CXS deep handler
+        if "myworkdayjobs.com" in job_url and "/job/" in job_url:
+            wd_m = re.search(r"https://([^/]+)/(?:[a-zA-Z-]+/)?([^/?#]+)(/job/.+)", job_url)
+            if wd_m:
+                host, board, ext_path = wd_m.group(1), wd_m.group(2), wd_m.group(3)
+                tenant = host.split(".")[0]
+                try:
+                    clean_path = ext_path.split("?")[0]
+                    api_u = f"https://{host}/wday/cxs/{tenant}/{board}{clean_path}"
+                    r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent, "Accept": "application/json"}, timeout=6)
+                    if r.status_code == 200:
+                        data = r.json()
+                        info = data.get("jobPostingInfo") or {}
+                        result["is_active"] = True
+                        result["title"] = (info.get("title") or "").strip()
+                        result["location"] = (info.get("location") or "").strip()
+                        result["employment_type"] = info.get("timeType") or ""
+                        jd_html = info.get("jobDescription") or ""
+                        if jd_html:
+                            result["description"] = BaseScraper.clean_html(jd_html)
+                        return result
+                    elif r.status_code == 404:
+                        result["is_active"] = False
+                        return result
+                except Exception:
+                    pass
+
+        # 4. SmartRecruiters API handler
+        if "smartrecruiters.com/" in job_url:
+            sr_m = re.search(r"smartrecruiters\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)", job_url)
+            if sr_m:
+                company, jid = sr_m.group(1), sr_m.group(2)
+                try:
+                    api_u = f"https://api.smartrecruiters.com/v1/companies/{company}/postings/{jid}"
+                    r = requests.get(api_u, headers={"User-Agent": SCRAPER_CONFIG.user_agent}, timeout=5)
+                    if r.status_code == 200:
+                        data = r.json()
+                        result["is_active"] = True
+                        result["title"] = (data.get("name") or "").strip()
+                        loc_dict = data.get("location") or {}
+                        loc_parts = [loc_dict.get("city"), loc_dict.get("region"), loc_dict.get("country")]
+                        result["location"] = ", ".join([p for p in loc_parts if p])
+                        result["employment_type"] = (data.get("typeOfEmployment") or {}).get("label") or ""
+                        job_ad = data.get("jobAd") or {}
+                        sections = job_ad.get("sections") or {}
+                        desc_parts = []
+                        for sec_name, sec_val in sections.items():
+                            t = sec_val.get("title") or ""
+                            c = BaseScraper.clean_html(sec_val.get("text") or "")
+                            if t or c:
+                                desc_parts.append(f"{t}:\n{c}" if t else c)
+                        if desc_parts:
+                            result["description"] = "\n\n".join(desc_parts)
+                        return result
+                    elif r.status_code == 404:
+                        result["is_active"] = False
+                        return result
+                except Exception:
+                    pass
+
         try:
             resp = requests.get(
                 job_url,
@@ -272,6 +364,12 @@ class BaseScraper(ABC):
                     ".job-description",
                     ".description",
                     "[data-automation-id='jobPostingDescription']",
+                    "#iCIMS_JobContent",
+                    ".iCIMS_JobContent",
+                    ".jv-job-detail-description",
+                    ".jv-job-detail-top",
+                    "[id*='requisitionDescriptionInterface']",
+                    ".BambooHR-ATS-Jobs-Item",
                     ".posting-page",
                     ".section-page",
                     "main",

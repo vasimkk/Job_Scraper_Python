@@ -310,6 +310,11 @@ def is_usa_location(
         if not int_info:
             return True
 
+    # Check for full US state name in raw location (e.g. "Michigan, Portage" or "Florida, Weston")
+    if any(re.search(rf"\b{re.escape(st_name)}\b", raw_lower) for st_name in US_STATE_NAMES_TO_CODE.keys()):
+        if not int_info:
+            return True
+
     # Check for City, ST in raw location (e.g. "San Francisco, CA" or "Austin, TX")
     if re.search(r"\b[A-Za-z\s.-]+,\s*[A-Z]{2}\b", raw_location or ""):
         m = re.findall(r"\b([A-Z]{2})\b", raw_location or "")
@@ -492,8 +497,14 @@ def parse_location(
         second = filtered_parts[1].strip()
         second_upper = second.upper()
         second_lower = second.lower()
+        first_lower = filtered_parts[0].strip().lower()
 
-        if second_upper in US_STATE_CODES:
+        # Workday format: "State, City" (e.g. "Michigan, Portage" or "Florida, Weston")
+        if first_lower in US_STATE_NAMES_TO_CODE:
+            state = US_STATE_NAMES_TO_CODE[first_lower]
+            city = filtered_parts[1].strip().title()
+            country = "United States"
+        elif second_upper in US_STATE_CODES:
             city = cand_city
             state = second_upper
             country = "United States"

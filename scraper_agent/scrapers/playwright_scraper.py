@@ -15,6 +15,7 @@ from playwright.sync_api import sync_playwright, Browser, Page
 from scraper_agent.scrapers.base import BaseScraper
 from scraper_agent.models.job import RawJobPost
 from scraper_agent.config import SCRAPER_CONFIG
+from scraper_agent.classifiers.location_parser import US_STATE_NAMES_TO_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -87,60 +88,646 @@ class PlaywrightCareerScraper(BaseScraper):
         super().__init__()
         self.headless = headless
 
-    def _fetch_greenhouse_api_jobs(self, slug: str, max_jobs: int = 120) -> List[RawJobPost]:
-        """Directly fetches jobs from Greenhouse's official public REST API when HTML is challenged or blocked."""
+    def _fetch_greenhouse_api_jobs(self, slug: str, max_jobs: int = 1000) -> List[RawJobPost]:
+        """Directly fetches jobs from Greenhouse's official public REST API with full content."""
         import urllib.request
         import json
         posts = []
         try:
-            api_url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+            # ?content=true includes full clean HTML description for all jobs in 1 call
+            api_url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
             req = urllib.request.Request(api_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
                 raw_list = data.get("jobs", [])
                 for item in raw_list[:max_jobs]:
                     jid = str(item.get("id"))
                     title = (item.get("title") or "").strip()
                     loc = item.get("location", {}).get("name", "") if isinstance(item.get("location"), dict) else ""
-                    # Prefer canonical greenhouse URL so deep detail fetch never 404s on custom SPA domains
                     canonical_gh_url = f"https://boards.greenhouse.io/{slug}/jobs/{jid}"
                     raw_abs_url = item.get("absolute_url") or ""
                     app_url = raw_abs_url if (raw_abs_url and "boards.greenhouse.io/company/" not in raw_abs_url) else canonical_gh_url
                     job_url = canonical_gh_url
+
+                    content_html = item.get("content") or ""
+                    raw_desc = BaseScraper.clean_html(content_html) if content_html else title
+
+                    posted_dt = datetime.now(timezone.utc)
+                    updated_at_str = item.get("updated_at")
+                    if updated_at_str:
+                        try:
+                            posted_dt = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+                        except Exception:
+                            pass
+
                     posts.append(
                         RawJobPost(
                             external_job_id=f"gh_{slug}_{jid}",
                             title=title,
-                            raw_description=title,
+                            raw_description=raw_desc,
                             raw_location=loc,
                             job_url=job_url,
                             application_url=app_url,
-                            posted_at=datetime.now(timezone.utc),
+                            posted_at=posted_dt,
+                            metadata={"ats": "greenhouse", "slug": slug},
                         )
                     )
         except Exception as e:
-            logger.debug(f"Greenhouse API fallback failed for {slug}: {e}")
+            logger.debug(f"Greenhouse API fetch failed for {slug}: {e}")
         return posts
+
+    def _fetch_lever_api_jobs(self, slug: str, max_jobs: int = 1000) -> List[RawJobPost]:
+        """Directly fetches jobs from Lever's official public REST API with full JD and commitment."""
+        import urllib.request
+        import json
+        posts = []
+        try:
+            api_url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+            req = urllib.request.Request(api_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw_list = json.loads(resp.read().decode())
+                if isinstance(raw_list, list):
+                    for item in raw_list[:max_jobs]:
+                        jid = str(item.get("id"))
+                        title = (item.get("text") or "").strip()
+                        categories = item.get("categories") or {}
+                        loc = categories.get("location") or item.get("workplaceType") or ""
+                        job_url = item.get("hostedUrl") or f"https://jobs.lever.co/{slug}/{jid}"
+                        app_url = item.get("applyUrl") or job_url
+                        posted_ts = item.get("createdAt")
+                        posted_dt = datetime.fromtimestamp(posted_ts / 1000.0, tz=timezone.utc) if posted_ts else datetime.now(timezone.utc)
+
+                        desc_plain = item.get("descriptionPlain") or ""
+                        desc_html = item.get("description") or ""
+                        desc = desc_plain if desc_plain else BaseScraper.clean_html(desc_html)
+                        lists = item.get("lists") or []
+                        for lst in lists:
+                            hdr = lst.get("text") or ""
+                            content = BaseScraper.clean_html(lst.get("content") or "")
+                            if hdr or content:
+                                desc += f"\n\n{hdr}:\n{content}"
+
+                        commitment = categories.get("commitment") or ""
+
+                        posts.append(
+                            RawJobPost(
+                                external_job_id=f"lever_{slug}_{jid}",
+                                title=title,
+                                raw_description=desc.strip() if desc.strip() else title,
+                                raw_location=loc,
+                                job_url=job_url,
+                                application_url=app_url,
+                                posted_at=posted_dt,
+                                metadata={"ats": "lever", "slug": slug, "commitment": commitment},
+                            )
+                        )
+        except Exception as e:
+            logger.debug(f"Lever API fetch failed for {slug}: {e}")
+        return posts
+
+    def _fetch_ashby_api_jobs(self, slug: str, max_jobs: int = 1000) -> List[RawJobPost]:
+        """Directly fetches jobs from Ashby's official public REST API with full JD and employmentType."""
+        import urllib.request
+        import json
+        posts = []
+        try:
+            api_url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
+            req = urllib.request.Request(api_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                raw_list = data.get("jobs", []) if isinstance(data, dict) else []
+                for item in raw_list[:max_jobs]:
+                    jid = str(item.get("id"))
+                    title = (item.get("title") or "").strip()
+                    loc = item.get("locationName") or ""
+                    job_url = item.get("jobUrl") or f"https://jobs.ashbyhq.com/{slug}/{jid}"
+                    app_url = item.get("applyUrl") or job_url
+                    published = item.get("publishedAt")
+                    try:
+                        posted_dt = datetime.fromisoformat(published.replace("Z", "+00:00")) if published else datetime.now(timezone.utc)
+                    except Exception:
+                        posted_dt = datetime.now(timezone.utc)
+
+                    desc_plain = item.get("descriptionPlain") or ""
+                    desc_html = item.get("descriptionHtml") or ""
+                    desc = desc_plain if desc_plain else BaseScraper.clean_html(desc_html)
+                    emp_type = item.get("employmentType") or ""
+
+                    posts.append(
+                        RawJobPost(
+                            external_job_id=f"ashby_{slug}_{jid}",
+                            title=title,
+                            raw_description=desc.strip() if desc.strip() else title,
+                            raw_location=loc,
+                            job_url=job_url,
+                            application_url=app_url,
+                            posted_at=posted_dt,
+                            metadata={"ats": "ashby", "slug": slug, "employment_type": emp_type},
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"Ashby API fetch failed for {slug}: {e}")
+        return posts
+
+    def _fetch_smartrecruiters_api_jobs(self, slug: str, max_jobs: int = 1000) -> List[RawJobPost]:
+        """Directly fetches jobs from SmartRecruiters official public REST API with pagination."""
+        import urllib.request
+        import json
+        posts = []
+        try:
+            offset = 0
+            limit = 100
+            while len(posts) < max_jobs:
+                api_url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?offset={offset}&limit={limit}"
+                req = urllib.request.Request(api_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode())
+                    content = data.get("content", []) if isinstance(data, dict) else []
+                    if not content:
+                        break
+                    for item in content:
+                        if len(posts) >= max_jobs:
+                            break
+                        jid = str(item.get("id"))
+                        title = (item.get("name") or "").strip()
+                        loc_dict = item.get("location") or {}
+                        loc_parts = [loc_dict.get("city"), loc_dict.get("region"), loc_dict.get("country")]
+                        loc = ", ".join([p for p in loc_parts if p])
+                        job_url = f"https://jobs.smartrecruiters.com/{slug}/{jid}"
+                        posted_str = item.get("releasedDate")
+                        try:
+                            posted_dt = datetime.fromisoformat(posted_str.replace("Z", "+00:00")) if posted_str else datetime.now(timezone.utc)
+                        except Exception:
+                            posted_dt = datetime.now(timezone.utc)
+
+                        type_emp = (item.get("typeOfEmployment") or {}).get("label") or ""
+
+                        posts.append(
+                            RawJobPost(
+                                external_job_id=f"sr_{slug}_{jid}",
+                                title=title,
+                                raw_description=title,
+                                raw_location=loc,
+                                job_url=job_url,
+                                application_url=job_url,
+                                posted_at=posted_dt,
+                                metadata={"ats": "smartrecruiters", "slug": slug, "employment_type": type_emp},
+                            )
+                        )
+                    offset += limit
+                    total_found = data.get("totalFound", 0)
+                    if offset >= total_found:
+                        break
+        except Exception as e:
+            logger.debug(f"SmartRecruiters API fetch failed for {slug}: {e}")
+        return posts
+
+    def _fetch_bamboohr_api_jobs(self, company: str, max_jobs: int = 250) -> List[RawJobPost]:
+        """Directly fetches jobs from BambooHR public jobs endpoint."""
+        import urllib.request
+        import json
+        posts = []
+        try:
+            api_url = f"https://{company}.bamboohr.com/careers/list"
+            req = urllib.request.Request(
+                api_url,
+                headers={"User-Agent": SCRAPER_CONFIG.user_agent, "Accept": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode())
+                raw_list = data.get("result", []) if isinstance(data, dict) else []
+                for item in raw_list[:max_jobs]:
+                    jid = str(item.get("id"))
+                    title = (item.get("jobOpeningName") or "").strip()
+                    loc_dict = item.get("location") or {}
+                    loc = f"{loc_dict.get('city', '')}, {loc_dict.get('state', '')}".strip(", ")
+                    job_url = f"https://{company}.bamboohr.com/careers/{jid}"
+                    emp_type = item.get("type") or item.get("jobType") or ""
+                    posts.append(
+                        RawJobPost(
+                            external_job_id=f"bamboo_{company}_{jid}",
+                            title=title,
+                            raw_description=title,
+                            raw_location=loc,
+                            job_url=job_url,
+                            application_url=job_url,
+                            posted_at=datetime.now(timezone.utc),
+                            metadata={"ats": "bamboohr", "company": company, "employment_type": emp_type},
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"BambooHR API fetch failed for {company}: {e}")
+        return posts
+
+    def _fetch_workday_cxs_jobs(self, host: str, tenant: str, board: str, max_jobs: int = 1500) -> List[RawJobPost]:
+        """Directly fetches jobs from Workday's official CXS public API with pagination."""
+        import urllib.request
+        import json
+        posts = []
+        try:
+            offset = 0
+            limit = 20
+            total_count = None
+            while len(posts) < max_jobs:
+                api_url = f"https://{host}/wday/cxs/{tenant}/{board}/jobs"
+                payload = json.dumps({"appliedFacets": {}, "limit": limit, "offset": offset, "searchText": ""}).encode("utf-8")
+                req = urllib.request.Request(
+                    api_url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": SCRAPER_CONFIG.user_agent,
+                        "Accept": "application/json",
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = json.loads(resp.read().decode())
+                    job_list = data.get("jobPostings", [])
+                    if not job_list:
+                        break
+                    for item in job_list:
+                        if len(posts) >= max_jobs:
+                            break
+                        title = (item.get("title") or "").strip()
+                        ext_path = item.get("externalPath") or ""
+                        loc = (item.get("locationsText") or "").strip()
+
+                        # Extract location from externalPath if loc is empty or generic (e.g. '2 Locations')
+                        if not loc or re.match(r"^\d+\s+Locations?$", loc, re.IGNORECASE):
+                            m_us = re.search(r"/job/US-([A-Z]{2})-([^/]+)/", ext_path)
+                            if m_us:
+                                st, city = m_us.group(1), m_us.group(2).replace("-", " ")
+                                loc = f"{city}, {st}, United States"
+                            elif "/job/" in ext_path:
+                                path_parts = ext_path.strip("/").split("/")
+                                if len(path_parts) >= 2:
+                                    loc_part = path_parts[1]
+                                    tokens = [t.lower() for t in loc_part.split("-")]
+                                    found_st = None
+                                    for t in tokens:
+                                        if t in US_STATE_NAMES_TO_CODE:
+                                            found_st = US_STATE_NAMES_TO_CODE[t]
+                                            break
+                                    if found_st:
+                                        clean_city = loc_part.replace("-", " ")
+                                        loc = f"{clean_city}, {found_st}, United States"
+                                    else:
+                                        loc = loc_part.replace("-", ", ")
+
+                        job_url = f"https://{host}/{board}{ext_path}" if ext_path else f"https://{host}/{board}"
+                        jid = re.sub(r"\W+", "_", ext_path.strip("/")) or title[:20]
+                        time_type = item.get("timeType") or ""
+                        posts.append(
+                            RawJobPost(
+                                external_job_id=f"wd_{tenant}_{jid}",
+                                title=title,
+                                raw_description=title,
+                                raw_location=loc,
+                                job_url=job_url,
+                                application_url=job_url,
+                                posted_at=datetime.now(timezone.utc),
+                                metadata={"ats": "workday", "tenant": tenant, "board": board, "time_type": time_type},
+                            )
+                        )
+                    if total_count is None and data.get("total"):
+                        total_count = data["total"]
+                    offset += len(job_list)
+                    if (total_count and offset >= total_count) or len(job_list) < limit:
+                        break
+        except Exception as e:
+            logger.debug(f"Workday CXS API fetch failed for {host}/{tenant}/{board}: {e}")
+        return posts
+
+    def _fetch_jobvite_jobs(self, url: str, max_jobs: int = 250) -> List[RawJobPost]:
+        """Directly fetches jobs from Jobvite career portals using XML feed and HTML parsing."""
+        import urllib.request
+        from bs4 import BeautifulSoup
+        posts = []
+        try:
+            m = re.search(r"jobs\.jobvite\.com/([a-zA-Z0-9_-]+)", url)
+            if not m:
+                m = re.search(r"[?&]c=([a-zA-Z0-9_-]+)", url)
+            company = m.group(1) if m else None
+
+            # 1. Try Jobvite public XML feed
+            if company:
+                try:
+                    xml_url = f"https://app.jobvite.com/CompanyJobs/Xml.aspx?c={company}"
+                    req = urllib.request.Request(xml_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+                    with urllib.request.urlopen(req, timeout=6) as r:
+                        xml_data = r.read().decode("utf-8", errors="ignore")
+                        if "<job>" in xml_data:
+                            soup = BeautifulSoup(xml_data, "xml")
+                            for j in soup.find_all("job")[:max_jobs]:
+                                jid = j.find("id").text if j.find("id") else ""
+                                title = j.find("title").text if j.find("title") else ""
+                                loc = j.find("location").text if j.find("location") else ""
+                                j_url = j.find("detail-url").text if j.find("detail-url") else url
+                                desc = j.find("description").text if j.find("description") else title
+                                jtype = j.find("job-type").text if j.find("job-type") else ""
+                                if title:
+                                    posts.append(
+                                        RawJobPost(
+                                            external_job_id=f"jobvite_{company}_{jid or title[:15]}",
+                                            title=title.strip(),
+                                            raw_description=BaseScraper.clean_html(desc),
+                                            raw_location=loc.strip(),
+                                            job_url=j_url.strip(),
+                                            application_url=j_url.strip(),
+                                            posted_at=datetime.now(timezone.utc),
+                                            metadata={"ats": "jobvite", "company": company, "employment_type": jtype},
+                                        )
+                                    )
+                            if posts:
+                                logger.info(f"Jobvite XML feed returned {len(posts)} jobs for {company}")
+                                return posts
+                except Exception:
+                    pass
+
+            # 2. HTML parsing of Jobvite jobs table
+            target_url = url if "/jobs" in url else (f"https://jobs.jobvite.com/{company}/jobs" if company else url)
+            req = urllib.request.Request(target_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                html_text = r.read().decode("utf-8", errors="ignore")
+                soup = BeautifulSoup(html_text, "html.parser")
+                job_links = soup.select(".jv-job-list a, .jv-job-card a, a[href*='/job/']")
+                seen = set()
+                for a in job_links[:max_jobs]:
+                    title = a.get_text(strip=True)
+                    href = a.get("href") or ""
+                    if not title or not href or len(title) < 4:
+                        continue
+                    full_url = urljoin(target_url, href)
+                    if full_url in seen:
+                        continue
+                    seen.add(full_url)
+                    loc = ""
+                    parent = a.find_parent("tr") or a.find_parent("div")
+                    if parent:
+                        loc_el = parent.select_one(".jv-job-list-location, [class*='location']")
+                        if loc_el:
+                            loc = loc_el.get_text(strip=True)
+                    jid_m = re.search(r"/job/([a-zA-Z0-9_-]+)", href)
+                    jid = jid_m.group(1) if jid_m else re.sub(r"\W+", "_", title[:20])
+                    posts.append(
+                        RawJobPost(
+                            external_job_id=f"jobvite_{company or 'jv'}_{jid}",
+                            title=title,
+                            raw_description=title,
+                            raw_location=loc,
+                            job_url=full_url,
+                            application_url=full_url,
+                            posted_at=datetime.now(timezone.utc),
+                            metadata={"ats": "jobvite", "company": company or ""},
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"Jobvite fetch failed for {url}: {e}")
+        return posts
+
+    def _fetch_icims_jobs(self, url: str, max_jobs: int = 250) -> List[RawJobPost]:
+        """Directly fetches jobs from iCIMS portal search pages with pagination."""
+        import urllib.request
+        from bs4 import BeautifulSoup
+        posts = []
+        try:
+            parsed = urlparse(url)
+            host = parsed.netloc
+            page = 0
+            seen = set()
+            while len(posts) < max_jobs and page < 10:
+                search_url = f"https://{host}/jobs/search?pr={page}&in_iframe=1"
+                req = urllib.request.Request(search_url, headers={"User-Agent": SCRAPER_CONFIG.user_agent})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    html_text = r.read().decode("utf-8", errors="ignore")
+                    soup = BeautifulSoup(html_text, "html.parser")
+                    rows = soup.select(".iCIMS_JobsTable .row, .iCIMS_JobHeaderGroup")
+                    if not rows:
+                        # Try finding any anchor with /jobs/
+                        rows = [a.find_parent("div") for a in soup.select("a.iCIMS_Anchor, a[href*='/jobs/']") if a.find_parent("div")]
+                    if not rows:
+                        break
+                    found_in_page = 0
+                    for row in rows:
+                        if len(posts) >= max_jobs:
+                            break
+                        a = row.select_one("a.iCIMS_Anchor, a[href*='/jobs/']") or row.find("a", href=True)
+                        if not a:
+                            continue
+                        title = a.get_text(strip=True)
+                        href = a.get("href") or ""
+                        if not title or not href or len(title) < 4:
+                            continue
+                        full_url = normalize_job_url(href, f"https://{host}")
+                        if full_url in seen:
+                            continue
+                        seen.add(full_url)
+                        found_in_page += 1
+                        loc = ""
+                        loc_el = row.select_one(".iCIMS_JobHeaderTag, span[itemprop='addressLocality'], [class*='location']")
+                        if loc_el:
+                            loc = loc_el.get_text(strip=True)
+                        jid_m = re.search(r"/jobs/(\d+)/", href)
+                        jid = jid_m.group(1) if jid_m else re.sub(r"\W+", "_", title[:20])
+                        posts.append(
+                            RawJobPost(
+                                external_job_id=f"icims_{host}_{jid}",
+                                title=title,
+                                raw_description=title,
+                                raw_location=loc,
+                                job_url=full_url,
+                                application_url=full_url,
+                                posted_at=datetime.now(timezone.utc),
+                                metadata={"ats": "icims", "host": host},
+                            )
+                        )
+                    if found_in_page == 0:
+                        break
+                    page += 1
+        except Exception as e:
+            logger.debug(f"iCIMS fetch failed for {url}: {e}")
+        return posts
+
+    def _fetch_taleo_jobs(self, url: str, max_jobs: int = 250) -> List[RawJobPost]:
+        """Fetches jobs from Oracle Taleo career portal using Playwright browser."""
+        posts = []
+        try:
+            with sync_playwright() as p:
+                browser = self._launch_browser(p)
+                context = browser.new_context(
+                    user_agent=SCRAPER_CONFIG.user_agent,
+                    viewport={"width": 1280, "height": 800},
+                    ignore_https_errors=True,
+                )
+                page = context.new_page()
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                    page.wait_for_timeout(3500)
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                    page.wait_for_timeout(1000)
+
+                    elements = page.query_selector_all(
+                        """
+                        span.titlelink a,
+                        a[id*="requisitionListInterface.reqTitle"],
+                        .multiline-data-container a,
+                        .portalContent table tr a[href*="jobdetail"]
+                        """
+                    )
+                    seen = set()
+                    for el in elements[:max_jobs]:
+                        t = (el.inner_text() or "").strip()
+                        href = el.get_attribute("href") or ""
+                        if not t or len(t) < 4:
+                            continue
+                        full_u = urljoin(url, href) if href else url
+                        if full_u in seen:
+                            continue
+                        seen.add(full_u)
+
+                        # Location in table row
+                        loc = ""
+                        try:
+                            loc = el.evaluate("""el => {
+                                const row = el.closest('tr, .multiline-data-container');
+                                if (!row) return '';
+                                const locEl = row.querySelector('[id*="Location"], [id*="reqLocation"], span.location');
+                                return locEl ? locEl.innerText.trim() : '';
+                            }""") or ""
+                        except Exception:
+                            pass
+
+                        jid_m = re.search(r"job=(\d+)", href) or re.search(r"requisition=(\d+)", href)
+                        jid = jid_m.group(1) if jid_m else re.sub(r"\W+", "_", t[:20])
+
+                        posts.append(
+                            RawJobPost(
+                                external_job_id=f"taleo_{jid}",
+                                title=t,
+                                raw_description=t,
+                                raw_location=loc,
+                                job_url=full_u,
+                                application_url=full_u,
+                                posted_at=datetime.now(timezone.utc),
+                                metadata={"ats": "taleo"},
+                            )
+                        )
+                finally:
+                    browser.close()
+        except Exception as e:
+            logger.debug(f"Taleo scraping failed for {url}: {e}")
+        return posts
+
+    def _route_ats_url(self, url: str, max_jobs: int = 1000) -> Optional[List[RawJobPost]]:
+        """Fast router that detects and executes direct ATS API endpoints for known ATS platforms."""
+        if not url:
+            return None
+        u = url.strip()
+
+        # 1. Greenhouse (handles boards.greenhouse.io, job-boards.greenhouse.io, and ?for=slug)
+        if "greenhouse.io" in u:
+            slug = None
+            m_for = re.search(r"[?&]for=([a-zA-Z0-9_-]+)", u)
+            if m_for:
+                slug = m_for.group(1)
+            if not slug:
+                m = re.search(r"(?:boards|job-boards)\.greenhouse\.io/([^/?#]+)", u)
+                if m and m.group(1) not in ("company", "embed"):
+                    slug = m.group(1)
+            if slug:
+                jobs = self._fetch_greenhouse_api_jobs(slug, max_jobs=max_jobs)
+                logger.info(f"Greenhouse API returned {len(jobs)} active jobs for {slug}")
+                return jobs
+
+        # 2. Lever
+        if "jobs.lever.co/" in u:
+            m = re.search(r"jobs\.lever\.co/([^/?#]+)", u)
+            if m:
+                jobs = self._fetch_lever_api_jobs(m.group(1), max_jobs=max_jobs)
+                logger.info(f"Lever API returned {len(jobs)} active jobs for {m.group(1)}")
+                return jobs
+
+        # 3. Ashby
+        if "jobs.ashbyhq.com/" in u:
+            m = re.search(r"jobs\.ashbyhq\.com/([^/?#]+)", u)
+            if m:
+                jobs = self._fetch_ashby_api_jobs(m.group(1), max_jobs=max_jobs)
+                logger.info(f"Ashby API returned {len(jobs)} active jobs for {m.group(1)}")
+                return jobs
+
+        # 4. SmartRecruiters
+        if "smartrecruiters.com" in u:
+            m = re.search(r"(?:careers|jobs)?\.smartrecruiters\.com/([^/?#]+)", u)
+            if m:
+                jobs = self._fetch_smartrecruiters_api_jobs(m.group(1), max_jobs=max_jobs)
+                logger.info(f"SmartRecruiters API returned {len(jobs)} active jobs for {m.group(1)}")
+                return jobs
+
+        # 5. Workday CXS
+        if "myworkdayjobs.com" in u:
+            parsed = urlparse(u)
+            host = parsed.netloc
+            parts = [p for p in parsed.path.strip("/").split("/") if p]
+            tenant = host.split(".")[0]
+            board = None
+            for p in parts:
+                if not re.match(r"^[a-z]{2}(?:-[A-Z]{2})?$", p, re.IGNORECASE) and p not in ("job", "jobs", "wday", "cxs"):
+                    board = p
+                    break
+            if not board and parts:
+                board = parts[-1]
+            if host and tenant and board:
+                jobs = self._fetch_workday_cxs_jobs(host, tenant, board, max_jobs=max_jobs)
+                logger.info(f"Workday CXS API returned {len(jobs)} active jobs for {tenant}/{board}")
+                return jobs
+
+        # 6. BambooHR
+        if "bamboohr.com" in u:
+            m = re.search(r"https?://([^.]+)\.bamboohr\.com", u)
+            if m:
+                jobs = self._fetch_bamboohr_api_jobs(m.group(1), max_jobs=max_jobs)
+                logger.info(f"BambooHR API returned {len(jobs)} active jobs for {m.group(1)}")
+                return jobs
+
+        # 7. Jobvite
+        if "jobvite.com" in u:
+            jobs = self._fetch_jobvite_jobs(u, max_jobs=max_jobs)
+            if jobs:
+                logger.info(f"Jobvite returned {len(jobs)} active jobs for {u}")
+                return jobs
+
+        # 8. iCIMS
+        if "icims.com" in u:
+            jobs = self._fetch_icims_jobs(u, max_jobs=max_jobs)
+            if jobs:
+                logger.info(f"iCIMS returned {len(jobs)} active jobs for {u}")
+                return jobs
+
+        # 9. Oracle Taleo
+        if "taleo.net" in u:
+            jobs = self._fetch_taleo_jobs(u, max_jobs=max_jobs)
+            if jobs:
+                logger.info(f"Taleo returned {len(jobs)} active jobs for {u}")
+                return jobs
+
+        return None
 
     def fetch_jobs(self, source_url: str) -> List[RawJobPost]:
         """Navigates to the real company career URL and extracts live job postings."""
-        return self.scrape_career_page(source_url, max_jobs=120)
+        return self.scrape_career_page(source_url, max_jobs=1000)
 
     def scrape_career_page(
-        self, career_url: str, max_jobs: int = 120
+        self, career_url: str, max_jobs: int = 1000
     ) -> List[RawJobPost]:
         """
-        Launches Playwright headless Chrome to render and extract jobs from the career page.
+        Extracts jobs from career page using fast ATS API routing first,
+        falling back to Playwright headless browser for custom landing pages & SPAs.
         """
-        # Fast, robust Greenhouse API check (bypasses Cloudflare/HTTP 403 on greenhouse boards)
-        if "boards.greenhouse.io/" in career_url:
-            board_m = re.search(r"boards\.greenhouse\.io/([^/?#]+)", career_url)
-            if board_m and board_m.group(1) != "company":
-                slug = board_m.group(1)
-                api_jobs = self._fetch_greenhouse_api_jobs(slug, max_jobs=max_jobs)
-                if api_jobs:
-                    logger.info(f"Greenhouse API returned {len(api_jobs)} active jobs for {slug}")
-                    return api_jobs
+        # Fast direct ATS routing check
+        direct_jobs = self._route_ats_url(career_url, max_jobs=max_jobs)
+        if direct_jobs:
+            return direct_jobs
 
         logger.info(f"Opening career page with Playwright: {career_url}")
         job_posts: List[RawJobPost] = []
@@ -160,6 +747,13 @@ class PlaywrightCareerScraper(BaseScraper):
                     page.goto(career_url, wait_until="domcontentloaded", timeout=20000)
                     page.wait_for_timeout(2000)
 
+                    # 1. Check if redirected to a recognized ATS platform
+                    if page.url and page.url != career_url:
+                        redirect_jobs = self._route_ats_url(page.url, max_jobs=max_jobs)
+                        if redirect_jobs:
+                            logger.info(f"Page redirected to ATS {page.url} -> {len(redirect_jobs)} jobs")
+                            return redirect_jobs
+
                     # Trigger lazy-load / scroll safely
                     try:
                         page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
@@ -169,34 +763,66 @@ class PlaywrightCareerScraper(BaseScraper):
                     except Exception:
                         pass
 
-                    # Check for embedded ATS iframes (e.g. embedded Greenhouse or Lever)
+                    # 2. Check for embedded ATS iframes (Greenhouse, Lever, Ashby, Workday, BambooHR, etc.)
                     try:
                         for frame in page.frames:
-                            if "greenhouse.io" in frame.url or "lever.co" in frame.url or "ashbyhq.com" in frame.url:
+                            frame_api_jobs = self._route_ats_url(frame.url, max_jobs=max_jobs)
+                            if frame_api_jobs:
+                                logger.info(f"Extracted {len(frame_api_jobs)} jobs from ATS iframe API: {frame.url}")
+                                job_posts.extend(frame_api_jobs)
+                                break
+                            if any(ats in frame.url for ats in [
+                                "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com",
+                                "icims.com", "taleo.net", "smartrecruiters.com", "bamboohr.com", "jobvite.com"
+                            ]):
                                 logger.info(f"Detected embedded ATS iframe: {frame.url}")
                                 job_posts.extend(self._extract_jobs_from_frame(frame, career_url))
                     except Exception:
                         pass
 
-                    # If not extracted from iframe, extract from main DOM
+                    # 3. Check for prominent direct ATS links on landing page
+                    if not job_posts:
+                        try:
+                            anchors = page.query_selector_all("a[href]")
+                            for a in anchors:
+                                href = (a.get_attribute("href") or "").strip()
+                                if any(ats in href for ats in [
+                                    "greenhouse.io", "lever.co", "myworkdayjobs.com", "ashbyhq.com",
+                                    "icims.com", "taleo.net", "smartrecruiters.com", "bamboohr.com", "jobvite.com"
+                                ]):
+                                    full_ats_url = urljoin(career_url, href)
+                                    ats_anchor_jobs = self._route_ats_url(full_ats_url, max_jobs=max_jobs)
+                                    if ats_anchor_jobs:
+                                        logger.info(f"Discovered ATS link on landing page: {full_ats_url} -> {len(ats_anchor_jobs)} jobs")
+                                        job_posts.extend(ats_anchor_jobs)
+                                        break
+                        except Exception:
+                            pass
+
+                    # 4. If not extracted from ATS router/iframe, extract from rendered DOM
                     if not job_posts:
                         job_posts = self._extract_jobs_from_page(page, career_url, max_jobs)
 
-                    # If still 0 jobs, look for navigation subpage like "/open-roles", "Open Roles", "View Openings", or ATS link
+                    # 5. If still 0 jobs, navigate to open openings subpage
                     if not job_posts:
                         subpage_link = self._find_openings_subpage(page, career_url)
                         if subpage_link and subpage_link != career_url and not subpage_link.endswith(career_url):
-                            logger.info(f"Navigating to openings subpage: {subpage_link}")
-                            try:
-                                page.goto(subpage_link, wait_until="domcontentloaded", timeout=20000)
-                                page.wait_for_timeout(2500)
-                                page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
-                                page.wait_for_timeout(600)
-                                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                                page.wait_for_timeout(1000)
-                                job_posts = self._extract_jobs_from_page(page, subpage_link, max_jobs)
-                            except Exception as sub_exc:
-                                logger.warning(f"Error navigating to openings subpage {subpage_link}: {sub_exc}")
+                            # Check if subpage link is an ATS URL
+                            sub_ats_jobs = self._route_ats_url(subpage_link, max_jobs=max_jobs)
+                            if sub_ats_jobs:
+                                job_posts.extend(sub_ats_jobs)
+                            else:
+                                logger.info(f"Navigating to openings subpage: {subpage_link}")
+                                try:
+                                    page.goto(subpage_link, wait_until="domcontentloaded", timeout=20000)
+                                    page.wait_for_timeout(2500)
+                                    page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                                    page.wait_for_timeout(600)
+                                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                                    page.wait_for_timeout(1000)
+                                    job_posts = self._extract_jobs_from_page(page, subpage_link, max_jobs)
+                                except Exception as sub_exc:
+                                    logger.warning(f"Error navigating to openings subpage {subpage_link}: {sub_exc}")
 
                 except Exception as nav_exc:
                     logger.warning(f"Unable to scrape career page {career_url}: {nav_exc}")
@@ -209,7 +835,7 @@ class PlaywrightCareerScraper(BaseScraper):
         except Exception as exc:
             logger.warning(f"Playwright error initializing for {career_url}: {exc}")
 
-        logger.info(f"Playwright extracted {len(job_posts)} jobs from {career_url}")
+        logger.info(f"Extracted {len(job_posts)} jobs from {career_url}")
         return job_posts
 
     def _find_openings_subpage(self, page: Page, base_url: str) -> Optional[str]:
@@ -222,7 +848,10 @@ class PlaywrightCareerScraper(BaseScraper):
                 if not href or href.startswith("#") or href.startswith("javascript:"):
                     continue
                 # Priority 1: direct ATS link
-                if any(ats in href for ats in ["greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "icims.com"]):
+                if any(ats in href for ats in [
+                    "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com",
+                    "icims.com", "taleo.net", "smartrecruiters.com", "bamboohr.com", "jobvite.com"
+                ]):
                     return urljoin(base_url, href)
                 # Priority 2: explicit open roles / jobs button
                 if any(phrase in txt for phrase in [
@@ -257,7 +886,7 @@ class PlaywrightCareerScraper(BaseScraper):
         return playwright_instance.chromium.launch(headless=self.headless)
 
     def _extract_jobs_from_page(
-        self, page: Page, base_url: str, max_jobs: int = 50
+        self, page: Page, base_url: str, max_jobs: int = 250
     ) -> List[RawJobPost]:
         """Extracts job elements and links using intelligent selectors."""
         html_content = page.content()
@@ -266,20 +895,35 @@ class PlaywrightCareerScraper(BaseScraper):
         seen_urls = set()
 
         # Selector patterns commonly used on modern career pages & ATS systems:
-        # Workday: [data-automation-id="jobTitle"], Greenhouse: .opening, Lever: .posting, etc.
+        # Workday, Greenhouse, Lever, Ashby, SmartRecruiters, BambooHR, iCIMS, Taleo, Jobvite
         job_elements = page.query_selector_all(
             """
             [data-automation-id="jobTitle"],
+            [data-automation-id="compositeHeader"] a,
             .opening a,
             .posting-title,
+            .posting a,
             [data-qa="job-card"] a,
             .job-card a,
             .job-listing a,
+            .job-item a,
+            .iCIMS_JobsTable a,
+            a.iCIMS_Anchor,
+            .iCIMS_JobHeaderGroup a,
+            span.titlelink a,
+            .multiline-data-container a,
+            a[id*="requisitionListInterface"],
+            .jv-job-list a,
+            .jv-job-card a,
+            .BambooHR-ATS-Jobs-Item a,
             a[href*="/job/"],
             a[href*="/jobs/"],
             a[href*="/careers/job/"],
+            a[href*="/careers/jobs/"],
             a[href*="/position/"],
             a[href*="/posting/"],
+            a[href*="smartrecruiters.com"],
+            a[href*="bamboohr.com/careers/"],
             a[href*="gh_jid="]
             """
         )
@@ -368,7 +1012,20 @@ class PlaywrightCareerScraper(BaseScraper):
         """Extracts job openings from an embedded ATS frame."""
         posts = []
         try:
-            links = frame.query_selector_all(".opening a, .posting a, a[href*='/jobs/']")
+            links = frame.query_selector_all(
+                """
+                [data-automation-id="jobTitle"],
+                .opening a,
+                .posting a,
+                .job-item a,
+                .iCIMS_JobsTable a,
+                span.titlelink a,
+                .jv-job-list a,
+                a[href*='/job/'],
+                a[href*='/jobs/'],
+                a[href*='/posting/']
+                """
+            )
             for l in links:
                 t = (l.inner_text() or "").strip()
                 href = l.get_attribute("href") or ""
@@ -389,7 +1046,7 @@ class PlaywrightCareerScraper(BaseScraper):
         return posts
 
     def _soup_fallback_extract(
-        self, soup: BeautifulSoup, base_url: str, max_jobs: int = 50
+        self, soup: BeautifulSoup, base_url: str, max_jobs: int = 250
     ) -> List[RawJobPost]:
         """Fallback BeautifulSoup extraction for unusual DOM trees."""
         posts = []
