@@ -1,6 +1,8 @@
 -- ScraperAgent Database Schema
 -- Matches the flow diagram and user specifications
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS companies (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(150) NOT NULL UNIQUE,
@@ -46,6 +48,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_url TEXT NOT NULL,
     application_url TEXT,
     content_hash VARCHAR(64),
+    job_embedding vector(768),
     status VARCHAR(50) NOT NULL DEFAULT 'OPEN',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -58,6 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_tech_role ON jobs(tech_role);
 CREATE INDEX IF NOT EXISTS idx_jobs_posted_at ON jobs(posted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_embedding ON jobs USING hnsw (job_embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS scrape_runs (
     id BIGSERIAL PRIMARY KEY,

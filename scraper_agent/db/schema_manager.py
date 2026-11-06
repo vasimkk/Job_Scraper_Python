@@ -30,6 +30,14 @@ def initialize_schema() -> None:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_jobs_tech_role ON jobs(tech_role);"
             )
+            # Ensure pgvector extension and job_embedding column exist
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            cur.execute(
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS job_embedding vector(768);"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_embedding ON jobs USING hnsw (job_embedding vector_cosine_ops);"
+            )
 
     logger.info("Database schema initialized successfully.")
 

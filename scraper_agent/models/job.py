@@ -66,6 +66,7 @@ class ProcessedJob:
     tech_role: Optional[str] = "Software Engineer"
     tech_keywords: List[str] = field(default_factory=list)
     status: str = "OPEN"
+    job_embedding: Optional[List[float]] = None
 
 
 @dataclass

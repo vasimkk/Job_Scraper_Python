@@ -34,6 +34,7 @@ from scraper_agent.classifiers.date_filter import (
 from scraper_agent.classifiers.jd_analyzer import JDAnalyzer
 from scraper_agent.scrapers.base import BaseScraper
 from scraper_agent.scrapers.registry import get_scraper_for_type
+from scraper_agent.embeddings.embedder import get_embedder
 
 logger = logging.getLogger(__name__)
 console = Console(highlight=False)
@@ -419,6 +420,15 @@ class ScraperAgent:
                 f"  [bold green]▶ Step 8 (Store Jobs in Database):[/bold green] Storing {len(processed_jobs)} USA jobs in PostgreSQL..."
             )
             if processed_jobs:
+                # Vectorize jobs using BAAI/bge-base-en-v1.5 (768 dimensions)
+                try:
+                    embedder = get_embedder()
+                    embeddings = embedder.embed_jobs(processed_jobs)
+                    for job, emb in zip(processed_jobs, embeddings):
+                        job.job_embedding = emb
+                except Exception as emb_err:
+                    logger.warning(f"Error generating embeddings for jobs: {emb_err}")
+
                 self.store_jobs_in_database(processed_jobs, stats)
                 console.print(
                     f"  [bold green]✓ Stored in DB:[/bold green] +{stats.new_jobs} new, ~{stats.updated_jobs} updated, ={stats.duplicate_jobs} existing."

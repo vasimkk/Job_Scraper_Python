@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from scraper_agent.db.connection import get_dict_cursor, get_db_connection
 from scraper_agent.models.job import Company, JobSource, ProcessedJob, ScrapeRunStats
+from scraper_agent.embeddings.embedder import JobEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,8 @@ class JobRepository:
         if not job.title or not job.job_url or not job.external_job_id:
             return "INVALID"
 
+        embedding_str = JobEmbedder.vector_to_pg_string(job.job_embedding)
+
         # Check if job already exists
         cur.execute(
             """
@@ -283,12 +286,12 @@ class JobRepository:
                     company_id, source_id, external_job_id, title, description,
                     location, city, state, country, remote_type, employment_type,
                     tech_role, posted_at, source_updated_at, first_seen_at, last_seen_at,
-                    job_url, application_url, content_hash, status
+                    job_url, application_url, content_hash, status, job_embedding
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s, %s::vector
                 )
                 """,
                 (
@@ -310,6 +313,7 @@ class JobRepository:
                     job.application_url,
                     job.content_hash,
                     job.status,
+                    embedding_str,
                 ),
             )
             return "NEW"
@@ -335,6 +339,7 @@ class JobRepository:
                     job_url = %s,
                     application_url = %s,
                     content_hash = %s,
+                    job_embedding = COALESCE(%s::vector, job_embedding),
                     status = 'OPEN',
                     last_seen_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
@@ -356,21 +361,34 @@ class JobRepository:
                     job.job_url,
                     job.application_url,
                     job.content_hash,
+                    embedding_str,
                     job_id,
                 ),
             )
             return "UPDATED"
         else:
             # Duplicate (Content unchanged, touch last_seen_at)
-            cur.execute(
-                """
-                UPDATE jobs SET
-                    last_seen_at = CURRENT_TIMESTAMP,
-                    status = 'OPEN'
-                WHERE id = %s
-                """,
-                (job_id,),
-            )
+            if embedding_str:
+                cur.execute(
+                    """
+                    UPDATE jobs SET
+                        last_seen_at = CURRENT_TIMESTAMP,
+                        status = 'OPEN',
+                        job_embedding = COALESCE(job_embedding, %s::vector)
+                    WHERE id = %s
+                    """,
+                    (embedding_str, job_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE jobs SET
+                        last_seen_at = CURRENT_TIMESTAMP,
+                        status = 'OPEN'
+                    WHERE id = %s
+                    """,
+                    (job_id,),
+                )
             return "DUPLICATE"
 
     @staticmethod
