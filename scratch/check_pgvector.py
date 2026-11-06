@@ -17,3 +17,4 @@ with get_db_connection() as conn:
             print("Vector type in DB:", cur.fetchall())
         else:
             print("Vector extension not in pg_available_extensions.")
+

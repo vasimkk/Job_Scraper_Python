@@ -17,3 +17,4 @@ with get_db_connection() as conn:
         row = cur.fetchone()
         print("job_embedding column verified:", row)
 print("Migration completed successfully!")
+

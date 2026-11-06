@@ -110,3 +110,4 @@ def get_embedder() -> JobEmbedder:
     if _EMBEDDER_INSTANCE is None:
         _EMBEDDER_INSTANCE = JobEmbedder()
     return _EMBEDDER_INSTANCE
+

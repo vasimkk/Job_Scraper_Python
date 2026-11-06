@@ -2,3 +2,4 @@
 from scraper_agent.embeddings.embedder import JobEmbedder, get_embedder
 
 __all__ = ["JobEmbedder", "get_embedder"]
+
