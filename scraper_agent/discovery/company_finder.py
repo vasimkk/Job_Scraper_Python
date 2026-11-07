@@ -84,7 +84,6 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Linear", "domain": "linear.app", "career_url": "https://jobs.ashbyhq.com/linear"},
         {"name": "Synthesia", "domain": "synthesia.io", "career_url": "https://jobs.ashbyhq.com/synthesia"},
         # Lever
-        {"name": "Stripe", "domain": "stripe.com", "career_url": "https://jobs.lever.co/stripe"},
         {"name": "Atlassian", "domain": "atlassian.com", "career_url": "https://jobs.lever.co/atlassian"},
         {"name": "Palantir", "domain": "palantir.com", "career_url": "https://jobs.lever.co/palantir"},
         {"name": "Dropbox", "domain": "dropbox.com", "career_url": "https://jobs.lever.co/dropbox"},
@@ -92,6 +91,10 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Retool", "domain": "retool.com", "career_url": "https://jobs.lever.co/retool"},
         {"name": "Zapier", "domain": "zapier.com", "career_url": "https://jobs.lever.co/zapier"},
         # Greenhouse
+        {"name": "Stripe", "domain": "stripe.com", "career_url": "https://boards.greenhouse.io/stripe"},
+        {"name": "Waymo", "domain": "waymo.com", "career_url": "https://boards.greenhouse.io/waymo"},
+        {"name": "Epic Games", "domain": "epicgames.com", "career_url": "https://boards.greenhouse.io/epicgames"},
+        {"name": "Asana", "domain": "asana.com", "career_url": "https://boards.greenhouse.io/asana"},
         {"name": "Databricks", "domain": "databricks.com", "career_url": "https://boards.greenhouse.io/databricks"},
         {"name": "Figma", "domain": "figma.com", "career_url": "https://boards.greenhouse.io/figma"},
         {"name": "Cloudflare", "domain": "cloudflare.com", "career_url": "https://boards.greenhouse.io/cloudflare"},
@@ -126,6 +129,26 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Instacart", "domain": "instacart.com", "career_url": "https://boards.greenhouse.io/instacart"},
         {"name": "Uber", "domain": "uber.com", "career_url": "https://boards.greenhouse.io/uber"},
         {"name": "Lyft", "domain": "lyft.com", "career_url": "https://boards.greenhouse.io/lyft"},
+        {"name": "Airbnb", "domain": "airbnb.com", "career_url": "https://boards.greenhouse.io/airbnb"},
+        {"name": "Notion", "domain": "notion.so", "career_url": "https://jobs.ashbyhq.com/notion"},
+        {"name": "Airtable", "domain": "airtable.com", "career_url": "https://boards.greenhouse.io/airtable"},
+        {"name": "Rippling", "domain": "rippling.com", "career_url": "https://boards.greenhouse.io/rippling"},
+        {"name": "Verkada", "domain": "verkada.com", "career_url": "https://boards.greenhouse.io/verkada"},
+        {"name": "Snap", "domain": "snap.com", "career_url": "https://boards.greenhouse.io/snap"},
+        {"name": "Splunk", "domain": "splunk.com", "career_url": "https://boards.greenhouse.io/splunk"},
+        {"name": "Zoom", "domain": "zoom.us", "career_url": "https://boards.greenhouse.io/zoom"},
+        {"name": "Confluent", "domain": "confluent.io", "career_url": "https://boards.greenhouse.io/confluent"},
+        {"name": "SentinelOne", "domain": "sentinelone.com", "career_url": "https://boards.greenhouse.io/sentinelone"},
+        {"name": "Cohesity", "domain": "cohesity.com", "career_url": "https://boards.greenhouse.io/cohesity"},
+        {"name": "Rubrik", "domain": "rubrik.com", "career_url": "https://boards.greenhouse.io/rubrik"},
+        {"name": "Tanium", "domain": "tanium.com", "career_url": "https://boards.greenhouse.io/tanium"},
+        {"name": "Wiz", "domain": "wiz.io", "career_url": "https://jobs.ashbyhq.com/wiz"},
+        {"name": "Anthropic", "domain": "anthropic.com", "career_url": "https://jobs.ashbyhq.com/anthropic"},
+        {"name": "Perplexity", "domain": "perplexity.ai", "career_url": "https://jobs.ashbyhq.com/perplexity"},
+        {"name": "Supabase", "domain": "supabase.com", "career_url": "https://jobs.ashbyhq.com/supabase"},
+        {"name": "Pinecone", "domain": "pinecone.io", "career_url": "https://boards.greenhouse.io/pinecone"},
+        {"name": "Weaviate", "domain": "weaviate.io", "career_url": "https://boards.greenhouse.io/weaviate"},
+        {"name": "Weights & Biases", "domain": "wandb.ai", "career_url": "https://boards.greenhouse.io/wandb"},
     ],
     "Healthcare": [
         # Workday CXS
@@ -174,6 +197,14 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Tenet Healthcare", "domain": "tenethealth.com", "career_url": "https://tenet.wd1.myworkdayjobs.com/Tenet_Careers"},
         {"name": "DaVita", "domain": "davita.com", "career_url": "https://davita.wd1.myworkdayjobs.com/DaVita_Careers"},
         {"name": "Quest Diagnostics", "domain": "questdiagnostics.com", "career_url": "https://questdiagnostics.wd1.myworkdayjobs.com/Quest_Careers"},
+        {"name": "Cityblock Health", "domain": "cityblock.com", "career_url": "https://boards.greenhouse.io/cityblockhealth"},
+        {"name": "Carbon Health", "domain": "carbonhealth.com", "career_url": "https://boards.greenhouse.io/carbonhealth"},
+        {"name": "Alto Pharmacy", "domain": "alto.com", "career_url": "https://boards.greenhouse.io/altopharmacy"},
+        {"name": "One Medical", "domain": "onemedical.com", "career_url": "https://boards.greenhouse.io/onemedical"},
+        {"name": "Oak Street Health", "domain": "oakstreethealth.com", "career_url": "https://boards.greenhouse.io/oakstreethealth"},
+        {"name": "Spring Health", "domain": "springhealth.com", "career_url": "https://jobs.ashbyhq.com/springhealth"},
+        {"name": "K Health", "domain": "khealth.com", "career_url": "https://boards.greenhouse.io/khealth"},
+        {"name": "Ribbon Health", "domain": "ribbonhealth.com", "career_url": "https://boards.greenhouse.io/ribbonhealth"},
     ],
     "Finance & Banking": [
         # Workday CXS
@@ -213,6 +244,11 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Northern Trust", "domain": "northerntrust.com", "career_url": "https://northerntrust.wd1.myworkdayjobs.com/NT"},
         {"name": "Discover", "domain": "discover.com", "career_url": "https://discover.wd5.myworkdayjobs.com/Discover_Careers"},
         {"name": "FactSet", "domain": "factset.com", "career_url": "https://factset.wd1.myworkdayjobs.com/FactSet"},
+        {"name": "Mercury", "domain": "mercury.com", "career_url": "https://jobs.lever.co/mercury"},
+        {"name": "Melio", "domain": "melio.com", "career_url": "https://boards.greenhouse.io/melio"},
+        {"name": "Modern Treasury", "domain": "moderntreasury.com", "career_url": "https://jobs.ashbyhq.com/moderntreasury"},
+        {"name": "Alloy", "domain": "alloy.com", "career_url": "https://boards.greenhouse.io/alloy"},
+        {"name": "TrueNorth", "domain": "truenorth.co", "career_url": "https://boards.greenhouse.io/truenorth"},
     ],
     "Insurance": [
         # Workday CXS
@@ -244,6 +280,9 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Principal Financial Group", "domain": "principal.com", "career_url": "https://principal.wd1.myworkdayjobs.com/Principal_Careers"},
         {"name": "Markel", "domain": "markel.com", "career_url": "https://markel.wd5.myworkdayjobs.com/Markel_Careers"},
         {"name": "Hanover Insurance", "domain": "hanover.com", "career_url": "https://hanover.wd1.myworkdayjobs.com/Hanover"},
+        {"name": "Vouch", "domain": "vouch.us", "career_url": "https://boards.greenhouse.io/vouch"},
+        {"name": "Boost Insurance", "domain": "boostinsurance.com", "career_url": "https://boards.greenhouse.io/boostinsurance"},
+        {"name": "Newfront", "domain": "newfront.com", "career_url": "https://jobs.ashbyhq.com/newfront"},
     ],
     "Solar, Energy & Utilities": [
         # SmartRecruiters
@@ -273,6 +312,10 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Enphase Energy", "domain": "enphase.com", "career_url": "https://enphase.wd5.myworkdayjobs.com/Enphase_Careers"},
         {"name": "Sunrun", "domain": "sunrun.com", "career_url": "https://sunrun.wd1.myworkdayjobs.com/Sunrun_Careers"},
         {"name": "Constellation Energy", "domain": "constellation.com", "career_url": "https://constellation.wd1.myworkdayjobs.com/Constellation"},
+        {"name": "Fervo Energy", "domain": "fervoenergy.com", "career_url": "https://jobs.ashbyhq.com/fervoenergy"},
+        {"name": "Commonwealth Fusion Systems", "domain": "cfs.energy", "career_url": "https://jobs.lever.co/cfs"},
+        {"name": "Helion Energy", "domain": "helionenergy.com", "career_url": "https://jobs.lever.co/helionenergy"},
+        {"name": "Antora Energy", "domain": "antoraenergy.com", "career_url": "https://jobs.lever.co/antoraenergy"},
     ],
     "Aerospace & Defense": [
         # Workday CXS
@@ -311,6 +354,11 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Textron", "domain": "textron.com", "career_url": "https://textron.wd1.myworkdayjobs.com/Textron_Careers"},
         {"name": "Huntington Ingalls", "domain": "huntingtoningalls.com", "career_url": "https://hii.wd1.myworkdayjobs.com/HII_Careers"},
         {"name": "Curtiss-Wright", "domain": "curtisswright.com", "career_url": "https://curtisswright.wd1.myworkdayjobs.com/CW_Careers"},
+        {"name": "Firefly Aerospace", "domain": "fireflyspace.com", "career_url": "https://boards.greenhouse.io/fireflyaerospace"},
+        {"name": "Impulse Space", "domain": "impulsespace.com", "career_url": "https://jobs.ashbyhq.com/impulsespace"},
+        {"name": "Hadrian", "domain": "hadrian.co", "career_url": "https://jobs.ashbyhq.com/hadrian"},
+        {"name": "Saronic", "domain": "saronic.com", "career_url": "https://jobs.ashbyhq.com/saronic"},
+        {"name": "Sierra Space", "domain": "sierraspace.com", "career_url": "https://jobs.lever.co/sierraspace"},
     ],
     "Pharma & Biotechnology": [
         # Workday CXS
@@ -335,6 +383,10 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Mammoth Biosciences", "domain": "mammoth.bio", "career_url": "https://boards.greenhouse.io/mammothbiosci"},
         {"name": "Sana Biotechnology", "domain": "sana.com", "career_url": "https://boards.greenhouse.io/sanabiotechnology"},
         {"name": "Relay Therapeutics", "domain": "relaytx.com", "career_url": "https://boards.greenhouse.io/relaytx"},
+        {"name": "Generate:Biomedicines", "domain": "generatebiomedicines.com", "career_url": "https://boards.greenhouse.io/generatebiomedicines"},
+        {"name": "Benchling", "domain": "benchling.com", "career_url": "https://boards.greenhouse.io/benchling"},
+        {"name": "Schrödinger", "domain": "schrodinger.com", "career_url": "https://boards.greenhouse.io/schrodinger"},
+        {"name": "Verve Therapeutics", "domain": "vervetx.com", "career_url": "https://boards.greenhouse.io/vervetx"},
         {"name": "Johnson & Johnson", "domain": "jnj.com", "career_url": "https://jnj.wd5.myworkdayjobs.com/JNJ_Careers"},
         {"name": "Merck", "domain": "merck.com", "career_url": "https://merck.wd5.myworkdayjobs.com/MerckCareers"},
         {"name": "Bristol Myers Squibb", "domain": "bms.com", "career_url": "https://bms.wd5.myworkdayjobs.com/BMS"},

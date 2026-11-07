@@ -57,33 +57,51 @@ def run():
 
     agent = ScraperAgent(filter_tech_only=True, enforce_date_window=True)
 
-    # Flatten and order all verified companies: prioritize ultra-high-yield Workday, SmartRecruiters, and Greenhouse
-    workday_list = []
-    smartrecruiters_list = []
-    ashby_list = []
-    lever_list = []
-    greenhouse_list = []
-    other_list = []
+    # Fetch existing job counts per company to prioritize unscraped and high-yield companies
+    existing_job_counts = {}
+    from scraper_agent.db.connection import get_db_connection
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT c.name, count(j.id) FROM companies c LEFT JOIN jobs j ON c.id=j.company_id GROUP BY c.name;")
+                existing_job_counts = dict(cur.fetchall())
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not fetch existing job counts: {e}[/yellow]")
 
+    def get_target_priority(item):
+        name, domain, url, industry = item
+        count = existing_job_counts.get(name, 0)
+        is_unscraped = (count == 0)
+        # Direct REST API endpoints execute in < 2 seconds and yield clean full JDs
+        if "greenhouse.io" in url:
+            tier = 1
+        elif "ashbyhq.com" in url:
+            tier = 2
+        elif "smartrecruiters.com" in url:
+            tier = 3
+        elif "lever.co" in url:
+            tier = 4
+        elif "myworkdayjobs.com" in url:
+            tier = 5
+        else:
+            tier = 6
+        return (0 if is_unscraped else 1, tier, count)
+
+    raw_targets = []
     for industry, comp_list in VERIFIED_INDUSTRY_COMPANIES.items():
         for c in comp_list:
             url = c["career_url"]
-            item = (c["name"], c.get("domain", ""), url, industry)
-            if "myworkdayjobs.com" in url:
-                workday_list.append(item)
-            elif "smartrecruiters.com" in url:
-                smartrecruiters_list.append(item)
-            elif "ashbyhq.com" in url:
-                ashby_list.append(item)
-            elif "lever.co" in url:
-                lever_list.append(item)
-            elif "greenhouse.io" in url:
-                greenhouse_list.append(item)
-            else:
-                other_list.append(item)
+            raw_targets.append((c["name"], c.get("domain", ""), url, industry))
 
-    # Interleave to balance across industries while leading with fast high-yield ATS APIs
-    all_targets = workday_list + smartrecruiters_list + ashby_list + greenhouse_list + lever_list + other_list
+    # Deduplicate raw targets by career URL
+    seen_urls = set()
+    deduped_targets = []
+    for item in raw_targets:
+        if item[2] not in seen_urls:
+            seen_urls.add(item[2])
+            deduped_targets.append(item)
+
+    all_targets = sorted(deduped_targets, key=get_target_priority)
 
     console.print(f"[bold green]Ready to scrape {len(all_targets)} high-yield multi-ATS company targets...[/bold green]\n")
 
