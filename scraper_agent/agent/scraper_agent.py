@@ -395,8 +395,22 @@ class ScraperAgent:
                     title=raw_job.title, description=desc
                 )
 
+                # Dynamically resolve hiring company if provided by platform metadata
+                target_company_id = company.id
+                if raw_job.metadata and raw_job.metadata.get("company_name"):
+                    raw_co = raw_job.metadata["company_name"].strip()
+                    if raw_co and raw_co.lower() not in (company.name.lower(), "dice employer", "dice company"):
+                        try:
+                            hiring_co = self.repo.get_or_create_company(
+                                name=raw_co,
+                                industry=company.industry,
+                            )
+                            target_company_id = hiring_co.id
+                        except Exception:
+                            target_company_id = company.id
+
                 processed_job = self.scrape_job_details(
-                    company_id=company.id,
+                    company_id=target_company_id,
                     source_id=source.id,
                     raw_job=raw_job,
                     employment_type=emp_type,

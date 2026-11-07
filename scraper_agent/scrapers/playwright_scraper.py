@@ -3,7 +3,7 @@ import re
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, quote_plus
 
 # Ensure temporary files stay on D: to prevent disk space exhaustion
 os.environ["TEMP"] = "D:\\Temp"
@@ -39,7 +39,8 @@ def is_valid_job_url(job_url: str) -> bool:
     # Known ATS domains are immediately recognized
     if any(ats in u for ats in [
         "greenhouse.io", "lever.co", "myworkdayjobs.com", "ashbyhq.com",
-        "icims.com", "taleo.net", "smartrecruiters.com", "bamboohr.com", "jobvite.com"
+        "icims.com", "taleo.net", "smartrecruiters.com", "bamboohr.com", "jobvite.com",
+        "dice.com"
     ]):
         return True
     # Path contains clear job indicators with identifiers or slugs
@@ -619,6 +620,140 @@ class PlaywrightCareerScraper(BaseScraper):
             logger.debug(f"Taleo scraping failed for {url}: {e}")
         return posts
 
+    def _fetch_dice_jobs(self, url_or_query: str, max_jobs: int = 1000) -> List[RawJobPost]:
+        """
+        Extracts live job postings from the Dice ATS platform (dice.com).
+        Supports search URLs, company profiles, and direct search queries.
+        Paginates dynamically across search pages and extracts titles, company names,
+        USA locations, employment types (Full-Time, Contract), relative posted dates,
+        and job URLs.
+        """
+        posts: List[RawJobPost] = []
+        u = (url_or_query or "").strip()
+
+        # Build search URL
+        if u.startswith("http"):
+            base_url = u
+        else:
+            query = quote_plus(u) if u else "software"
+            base_url = f"https://www.dice.com/jobs?q={query}"
+
+        # Relative date parser for Dice
+        def _parse_dice_relative_date(posted_str: str) -> datetime:
+            now = datetime.now(timezone.utc)
+            s = (posted_str or "").lower().strip()
+            if any(k in s for k in ["today", "just now", "moment"]):
+                return now
+            if "yesterday" in s:
+                return now - timedelta(days=1)
+            m_d = re.search(r"(\d+)\s*d", s)
+            if m_d:
+                return now - timedelta(days=int(m_d.group(1)))
+            m_h = re.search(r"(\d+)\s*h", s)
+            if m_h:
+                return now - timedelta(hours=int(m_h.group(1)))
+            m_w = re.search(r"(\d+)\s*w", s)
+            if m_w:
+                return now - timedelta(weeks=int(m_w.group(1)))
+            m_m = re.search(r"(\d+)\s*mo", s)
+            if m_m:
+                return now - timedelta(days=int(m_m.group(1)) * 30)
+            return now
+
+        seen_ids = set()
+        page = 1
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        while len(posts) < max_jobs and page <= 50:
+            sep = "&" if "?" in base_url else "?"
+            target_page_url = f"{base_url}{sep}page={page}"
+            try:
+                import requests
+                resp = requests.get(target_page_url, headers=headers, timeout=10)
+                if resp.status_code != 200 or not resp.text:
+                    break
+
+                soup = BeautifulSoup(resp.text, "html.parser")
+                card_anchors = soup.find_all("a", {"data-testid": "job-search-job-card-link"})
+                if not card_anchors:
+                    break
+
+                page_new_jobs = 0
+                for a in card_anchors:
+                    if len(posts) >= max_jobs:
+                        break
+                    card = a.parent
+                    href = a.get("href", "")
+                    m_id = re.search(r"/job-detail/([a-f0-9-]+)", href)
+                    if not m_id:
+                        continue
+                    job_uuid = m_id.group(1)
+                    if job_uuid in seen_ids:
+                        continue
+                    seen_ids.add(job_uuid)
+
+                    title_el = card.find("a", {"data-testid": "job-search-job-detail-link"})
+                    title = title_el.text.strip() if title_el else ""
+                    if not title or len(title) < 3:
+                        aria_title = a.get("aria-label", "")
+                        if "View Details for " in aria_title:
+                            title = aria_title.replace("View Details for ", "").split("(")[0].strip()
+                    if not title:
+                        continue
+
+                    co_el = card.find("p", {"data-testid": "job-card-company-name"})
+                    company_name = co_el.text.strip() if co_el else "Dice Employer"
+
+                    loc_p = card.find("p", class_=re.compile(r"text-foreground-light"))
+                    loc_text = loc_p.text.strip() if loc_p else ""
+                    raw_loc = loc_text
+                    posted_at = datetime.now(timezone.utc)
+                    if "•" in loc_text:
+                        parts = [p.strip() for p in loc_text.split("•") if p.strip()]
+                        if len(parts) >= 2:
+                            raw_loc = parts[0]
+                            posted_at = _parse_dice_relative_date(parts[1])
+                        elif len(parts) == 1:
+                            raw_loc = parts[0]
+
+                    emp_el = card.find(id="employmentType-label")
+                    emp_type = emp_el.text.strip() if emp_el else "Full-time"
+
+                    job_url = f"https://www.dice.com/job-detail/{job_uuid}"
+                    desc = f"{title} position at {company_name} located in {raw_loc}. Employment type: {emp_type}. Source: Dice ATS Platform."
+
+                    raw_post = RawJobPost(
+                        external_job_id=job_uuid,
+                        title=title,
+                        raw_description=desc,
+                        raw_location=raw_loc,
+                        job_url=job_url,
+                        application_url=job_url,
+                        posted_at=posted_at,
+                        metadata={
+                            "company_name": company_name,
+                            "employment_type": emp_type,
+                            "ats": "dice",
+                            "source": "Dice",
+                        },
+                    )
+                    posts.append(raw_post)
+                    page_new_jobs += 1
+
+                if page_new_jobs == 0:
+                    break
+
+                page += 1
+            except Exception as e:
+                logger.debug(f"Error fetching Dice jobs on page {page}: {e}")
+                break
+
+        return posts
+
     def _route_ats_url(self, url: str, max_jobs: int = 1000) -> Optional[List[RawJobPost]]:
         """Fast router that detects and executes direct ATS API endpoints for known ATS platforms."""
         if not url:
@@ -709,6 +844,13 @@ class PlaywrightCareerScraper(BaseScraper):
             jobs = self._fetch_taleo_jobs(u, max_jobs=max_jobs)
             if jobs:
                 logger.info(f"Taleo returned {len(jobs)} active jobs for {u}")
+                return jobs
+
+        # 10. Dice Tech ATS Platform
+        if "dice.com" in u:
+            jobs = self._fetch_dice_jobs(u, max_jobs=max_jobs)
+            if jobs:
+                logger.info(f"Dice ATS platform returned {len(jobs)} active jobs for {u}")
                 return jobs
 
         return None

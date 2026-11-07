@@ -76,33 +76,10 @@ def print_database_stats():
 
 
 def run_interactive_mode(enforce_date_window: bool = True):
-    """Interactive CLI menu to choose industry, target ATS platforms, and run dynamic scraping."""
-    console.print("\n[bold cyan]Select Target Industry for Dynamic Discovery:[/bold cyan]")
-    console.print("  [bold green]0.[/bold green] ALL 7 Target Industries")
-    for idx, ind in enumerate(TARGET_INDUSTRIES, 1):
-        console.print(f"  [bold green]{idx}.[/bold green] {ind}")
-    console.print("  [bold green]C.[/bold green] Custom Industry (Type your own, e.g. 'FinTech', 'E-Commerce')")
-
-    choice = Prompt.ask(
-        "Enter selection (number, name, or custom industry)",
-        default="0",
-    )
-
-    selected_industry = "ALL"
-    if choice.upper() == "C":
-        selected_industry = Prompt.ask("Enter custom industry name", default="IT, Software & Technology")
-    elif choice.isdigit():
-        choice_idx = int(choice)
-        if 1 <= choice_idx <= len(TARGET_INDUSTRIES):
-            selected_industry = TARGET_INDUSTRIES[choice_idx - 1]
-    elif choice in TARGET_INDUSTRIES:
-        selected_industry = choice
-    elif choice.strip():
-        selected_industry = normalize_industry_name(choice.strip())
-
-    # ATS Platform Selection across industry targets
-    console.print("\n[bold cyan]Select Target ATS Platform for Industry Discovery:[/bold cyan]")
-    console.print("  [bold green]0.[/bold green] ALL Supported ATS Platforms (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Jobvite, Taleo, etc.)")
+    """Interactive CLI menu to choose ATS platform first and run across all industries simultaneously."""
+    # Step 1: ATS Platform Selection first
+    console.print("\n[bold cyan]Step 1: Select Target ATS Platform:[/bold cyan]")
+    console.print("  [bold green]0.[/bold green] ALL Supported ATS Platforms (Dice, Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Jobvite, Taleo, etc.)")
     for idx, ats in enumerate(SUPPORTED_ATS_PLATFORMS[1:], 1):
         console.print(f"  [bold green]{idx}.[/bold green] {ats}")
 
@@ -120,11 +97,38 @@ def run_interactive_mode(enforce_date_window: bool = True):
     elif ats_choice.strip():
         selected_ats = ats_choice.strip()
 
-    target_jobs_input = Prompt.ask(
-        "Enter Target Jobs Goal (e.g. 9000, 0 for unlimited)",
-        default="9000",
+    # Step 2: Target Industry (Defaults to ALL 7 Target Industries simultaneously)
+    console.print(f"\n[bold cyan]Step 2: Target Industry Coverage for [yellow]{selected_ats}[/yellow] ATS:[/bold cyan]")
+    console.print("  [bold green]0.[/bold green] ALL 7 Target Industries (Simultaneous discovery across IT, Healthcare, Finance, Defense, Energy, Insurance, Pharma)")
+    for idx, ind in enumerate(TARGET_INDUSTRIES, 1):
+        console.print(f"  [bold green]{idx}.[/bold green] {ind}")
+    console.print("  [bold green]C.[/bold green] Custom Industry (Type your own, e.g. 'FinTech', 'E-Commerce')")
+
+    choice = Prompt.ask(
+        "Enter industry selection (press Enter for ALL 7 Industries)",
+        default="0",
     )
-    target_jobs = int(target_jobs_input) if target_jobs_input.isdigit() else 9000
+
+    selected_industry = "ALL"
+    if choice.upper() == "C":
+        selected_industry = Prompt.ask("Enter custom industry name", default="IT, Software & Technology")
+    elif choice.isdigit():
+        choice_idx = int(choice)
+        if choice_idx == 0:
+            selected_industry = "ALL"
+        elif 1 <= choice_idx <= len(TARGET_INDUSTRIES):
+            selected_industry = TARGET_INDUSTRIES[choice_idx - 1]
+    elif choice in TARGET_INDUSTRIES:
+        selected_industry = choice
+    elif choice.strip():
+        selected_industry = normalize_industry_name(choice.strip())
+
+    # Step 3: Target Jobs Goal
+    target_jobs_input = Prompt.ask(
+        "Enter Target Jobs Goal (e.g. 12000, 0 for unlimited)",
+        default="12000",
+    )
+    target_jobs = int(target_jobs_input) if target_jobs_input.isdigit() else 12000
 
     agent = ScraperAgent(enforce_date_window=enforce_date_window)
     agent.start(
@@ -150,7 +154,7 @@ def main():
         "--ats",
         type=str,
         default="ALL",
-        help="Target ATS platform (e.g., 'Workday', 'Greenhouse', 'Lever', 'Ashby', 'SmartRecruiters', 'Jobvite', 'Taleo', 'ALL')",
+        help="Target ATS platform (e.g., 'Dice', 'Workday', 'Greenhouse', 'Lever', 'Ashby', 'SmartRecruiters', 'Jobvite', 'Taleo', 'ALL')",
     )
     parser.add_argument(
         "-c",
@@ -209,7 +213,7 @@ def main():
         "--target-jobs",
         type=int,
         default=0,
-        help="Target total number of jobs to store in the database (e.g. 9000)",
+        help="Target total number of jobs to store in the database (e.g. 12000)",
     )
     parser.add_argument(
         "--limit-per-industry",
@@ -242,7 +246,7 @@ def main():
     dynamic_disc = not args.no_discovery
     filter_tech = not args.all_jobs
 
-    if args.interactive or len(sys.argv) == 1:
+    if args.interactive:
         run_interactive_mode(enforce_date_window=enforce_dates)
         return
 
@@ -268,7 +272,13 @@ def main():
             console.print(f"[dim]Next daily scrape in {args.interval} hour(s). Sleeping...[/dim]")
             time.sleep(sleep_secs)
 
-    # Single-run execution
+    # Single-run execution (directly starts across all ATS platforms and industries without prompts)
+    ats_label = args.ats.upper() if args.ats else "ALL"
+    ind_label = args.industry or "ALL 7 Target Industries"
+    console.print(
+        f"[bold green]▶ Direct Execution:[/bold green] Processing [cyan]{ats_label}[/cyan] ATS platforms across [yellow]{ind_label}[/yellow]..."
+    )
+
     agent = ScraperAgent(
         filter_tech_only=filter_tech,
         enforce_date_window=enforce_dates,

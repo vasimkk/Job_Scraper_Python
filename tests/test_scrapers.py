@@ -2,10 +2,18 @@ import unittest
 from scraper_agent.scrapers.base import BaseScraper
 from scraper_agent.scrapers.registry import get_scraper_for_type
 from scraper_agent.scrapers.generic_html import GenericHtmlScraper
-from scraper_agent.scrapers.playwright_scraper import PlaywrightCareerScraper
+from scraper_agent.scrapers.playwright_scraper import PlaywrightCareerScraper, is_valid_job_url
+from scraper_agent.discovery.company_finder import matches_ats, SUPPORTED_ATS_PLATFORMS
 
 
 class TestScrapers(unittest.TestCase):
+
+    def test_dice_ats_platform_support(self):
+        self.assertIn("Dice", SUPPORTED_ATS_PLATFORMS)
+        self.assertTrue(matches_ats("https://www.dice.com/jobs?q=software", "Dice"))
+        self.assertTrue(matches_ats("https://www.dice.com/jobs?q=software", "dice"))
+        self.assertTrue(matches_ats("https://www.dice.com/jobs?q=software", "dise"))
+        self.assertTrue(is_valid_job_url("https://www.dice.com/job-detail/56bfa0f0-8d70-4033-8bde-f962d9919761"))
 
     def test_clean_html(self):
         html_input = "<p>We are seeking a <strong>Python Engineer</strong> to join our team.</p><ul><li>5+ years experience</li></ul>"

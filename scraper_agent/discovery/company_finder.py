@@ -28,6 +28,7 @@ TARGET_INDUSTRIES = [
 # Supported ATS Platforms for Target Filtering
 SUPPORTED_ATS_PLATFORMS = [
     "ALL",
+    "Dice",
     "Workday",
     "Greenhouse",
     "Lever",
@@ -46,6 +47,8 @@ def matches_ats(url: str, ats: Optional[str]) -> bool:
         return True
     a = ats.strip().lower()
     u = (url or "").lower()
+    if a in ("dice", "dise"):
+        return "dice.com" in u
     if a in ("workday", "wd"):
         return "myworkdayjobs.com" in u
     if a == "greenhouse":
@@ -70,6 +73,10 @@ def matches_ats(url: str, ats: Optional[str]) -> bool:
 # Verified real corporate career portals across all ATS platforms for the 7 Target Industries
 VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
     "IT, Software & Technology": [
+        # Dice ATS Platform
+        {"name": "Dice Tech Careers", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=software+engineer", "industry": "IT, Software & Technology"},
+        {"name": "Dice Cloud & DevOps", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=cloud+devops", "industry": "IT, Software & Technology"},
+        {"name": "Dice Data & AI", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=data+engineer", "industry": "IT, Software & Technology"},
         # Workday CXS
         {"name": "NVIDIA", "domain": "nvidia.com", "career_url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"},
         {"name": "Salesforce", "domain": "salesforce.com", "career_url": "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site"},
@@ -151,6 +158,8 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Weights & Biases", "domain": "wandb.ai", "career_url": "https://boards.greenhouse.io/wandb"},
     ],
     "Healthcare": [
+        # Dice ATS Platform
+        {"name": "Dice HealthTech", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=healthcare+software", "industry": "Healthcare"},
         # Workday CXS
         {"name": "Humana", "domain": "humana.com", "career_url": "https://humana.wd5.myworkdayjobs.com/Humana_External_Career_Site"},
         {"name": "Medtronic", "domain": "medtronic.com", "career_url": "https://medtronic.wd1.myworkdayjobs.com/MedtronicCareers"},
@@ -207,6 +216,8 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Ribbon Health", "domain": "ribbonhealth.com", "career_url": "https://boards.greenhouse.io/ribbonhealth"},
     ],
     "Finance & Banking": [
+        # Dice ATS Platform
+        {"name": "Dice FinTech", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=fintech+developer", "industry": "Finance & Banking"},
         # Workday CXS
         {"name": "US Bank", "domain": "usbank.com", "career_url": "https://usbank.wd1.myworkdayjobs.com/US_Bank_Careers"},
         # SmartRecruiters
@@ -251,6 +262,8 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "TrueNorth", "domain": "truenorth.co", "career_url": "https://boards.greenhouse.io/truenorth"},
     ],
     "Insurance": [
+        # Dice ATS Platform
+        {"name": "Dice InsurTech", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=insurance+software", "industry": "Insurance"},
         # Workday CXS
         {"name": "Travelers", "domain": "travelers.com", "career_url": "https://travelers.wd5.myworkdayjobs.com/External"},
         # Lever
@@ -285,6 +298,8 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Newfront", "domain": "newfront.com", "career_url": "https://jobs.ashbyhq.com/newfront"},
     ],
     "Solar, Energy & Utilities": [
+        # Dice ATS Platform
+        {"name": "Dice CleanTech", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=energy+software", "industry": "Solar, Energy & Utilities"},
         # SmartRecruiters
         {"name": "Schneider Electric", "domain": "se.com", "career_url": "https://jobs.smartrecruiters.com/SchneiderElectric"},
         # Lever
@@ -318,6 +333,8 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Antora Energy", "domain": "antoraenergy.com", "career_url": "https://jobs.lever.co/antoraenergy"},
     ],
     "Aerospace & Defense": [
+        # Dice ATS Platform
+        {"name": "Dice DefenseTech", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=defense+software", "industry": "Aerospace & Defense"},
         # Workday CXS
         {"name": "Boeing", "domain": "boeing.com", "career_url": "https://boeing.wd1.myworkdayjobs.com/EXTERNAL_CAREERS"},
         # Ashby
@@ -361,6 +378,8 @@ VERIFIED_INDUSTRY_COMPANIES: Dict[str, List[Dict[str, str]]] = {
         {"name": "Sierra Space", "domain": "sierraspace.com", "career_url": "https://jobs.lever.co/sierraspace"},
     ],
     "Pharma & Biotechnology": [
+        # Dice ATS Platform
+        {"name": "Dice BioTech", "domain": "dice.com", "career_url": "https://www.dice.com/jobs?q=bioinformatics", "industry": "Pharma & Biotechnology"},
         # Workday CXS
         {"name": "Amgen", "domain": "amgen.com", "career_url": "https://amgen.wd1.myworkdayjobs.com/Careers"},
         {"name": "Pfizer", "domain": "pfizer.com", "career_url": "https://pfizer.wd1.myworkdayjobs.com/PfizerCareers"},
@@ -522,7 +541,8 @@ class DynamicJobDiscovery:
 
                 if comp.name.lower() in verified_names or any(ats in pair[1].source_url for ats in [
                     "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com",
-                    "smartrecruiters.com", "bamboohr.com", "jobvite.com", "icims.com", "taleo.net"
+                    "smartrecruiters.com", "bamboohr.com", "jobvite.com", "icims.com", "taleo.net",
+                    "dice.com"
                 ]):
                     verified_results.append(pair)
                 else:

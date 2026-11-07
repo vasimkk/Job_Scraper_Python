@@ -288,6 +288,45 @@ class BaseScraper(ABC):
                 except Exception:
                     pass
 
+        # 5. Dice ATS Platform handler
+        if "dice.com/job-detail/" in job_url:
+            try:
+                r = requests.get(
+                    job_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    },
+                    timeout=6,
+                )
+                if r.status_code == 200:
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    tag = soup.find("script", type="application/ld+json")
+                    if tag and tag.string:
+                        data = json.loads(tag.string)
+                        if isinstance(data, dict):
+                            result["is_active"] = True
+                            if data.get("title"):
+                                result["title"] = str(data["title"]).strip()
+                            if data.get("description"):
+                                result["description"] = BaseScraper.clean_html(str(data["description"]))
+                            if data.get("employmentType"):
+                                result["employment_type"] = str(data["employmentType"]).strip()
+                            loc_obj = data.get("jobLocation")
+                            if isinstance(loc_obj, dict):
+                                addr = loc_obj.get("address", {})
+                                if isinstance(addr, dict):
+                                    loc_parts = [addr.get("addressLocality"), addr.get("addressRegion"), addr.get("addressCountry")]
+                                    valid_parts = [p for p in loc_parts if p and isinstance(p, str)]
+                                    if valid_parts:
+                                        result["location"] = ", ".join(valid_parts)
+                            return result
+                elif r.status_code == 404:
+                    result["is_active"] = False
+                    return result
+            except Exception:
+                pass
+
         try:
             resp = requests.get(
                 job_url,
@@ -317,6 +356,8 @@ class BaseScraper(ABC):
                                     result["title"] = str(data["title"]).strip()
                                 if data.get("employmentType"):
                                     result["employment_type"] = str(data["employmentType"]).strip()
+                                if data.get("description"):
+                                    result["description"] = BaseScraper.clean_html(str(data["description"]))
                                 job_loc = data.get("jobLocation")
                                 if isinstance(job_loc, dict):
                                     addr = job_loc.get("address", {})
