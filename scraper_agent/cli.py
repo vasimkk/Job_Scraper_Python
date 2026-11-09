@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt
 
-from scraper_agent.db.schema_manager import initialize_schema, seed_database
+from scraper_agent.db.schema_manager import initialize_schema, seed_database, sync_sequences
 from scraper_agent.db.connection import test_connection
 from scraper_agent.db.repository import JobRepository
 from scraper_agent.discovery.company_finder import (
@@ -230,6 +230,9 @@ def main():
             "[bold red]Error:[/bold red] Cannot connect to PostgreSQL database. Please ensure PostgreSQL is running and check your .env settings."
         )
         sys.exit(1)
+
+    # Ensure PostgreSQL sequences are synchronized with current MAX(id)
+    sync_sequences()
 
     if args.init_db:
         console.print("[cyan]Initializing database schema...[/cyan]")

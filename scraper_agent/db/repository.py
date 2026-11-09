@@ -421,16 +421,32 @@ class JobRepository:
         """Create a new scrape_runs entry and return its ID."""
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO scrape_runs (source_id, started_at, status)
-                    VALUES (%s, CURRENT_TIMESTAMP, 'PENDING')
-                    RETURNING id
-                    """,
-                    (source_id,),
-                )
-                run_id = cur.fetchone()[0]
-                return run_id
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO scrape_runs (source_id, started_at, status)
+                        VALUES (%s, CURRENT_TIMESTAMP, 'PENDING')
+                        RETURNING id
+                        """,
+                        (source_id,),
+                    )
+                    return cur.fetchone()[0]
+                except Exception as exc:
+                    if "scrape_runs_pkey" in str(exc) or "unique constraint" in str(exc).lower():
+                        logger.warning("scrape_runs_pkey collision detected. Resyncing sequence and retrying...")
+                        cur.execute(
+                            "SELECT setval(pg_get_serial_sequence('scrape_runs', 'id'), COALESCE(MAX(id), 0) + 1, false) FROM scrape_runs"
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO scrape_runs (source_id, started_at, status)
+                            VALUES (%s, CURRENT_TIMESTAMP, 'PENDING')
+                            RETURNING id
+                            """,
+                            (source_id,),
+                        )
+                        return cur.fetchone()[0]
+                    raise
 
     @staticmethod
     def complete_scrape_run(run_id: int, stats: ScrapeRunStats) -> None:

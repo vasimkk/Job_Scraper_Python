@@ -1,7 +1,12 @@
 import unittest
 import os
-os.environ["TEMP"] = "D:\\Temp"
-os.environ["TMP"] = "D:\\Temp"
+temp_dir = "D:\\Temp"
+try:
+    os.makedirs(temp_dir, exist_ok=True)
+    os.environ["TEMP"] = temp_dir
+    os.environ["TMP"] = temp_dir
+except Exception:
+    pass
 
 from scraper_agent.scrapers.playwright_scraper import PlaywrightCareerScraper
 

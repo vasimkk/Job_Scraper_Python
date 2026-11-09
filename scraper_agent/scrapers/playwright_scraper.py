@@ -5,9 +5,14 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin, urlparse, quote_plus
 
-# Ensure temporary files stay on D: to prevent disk space exhaustion
-os.environ["TEMP"] = "D:\\Temp"
-os.environ["TMP"] = "D:\\Temp"
+# Ensure temporary files stay on D: if available to prevent disk space exhaustion
+temp_dir = "D:\\Temp"
+try:
+    os.makedirs(temp_dir, exist_ok=True)
+    os.environ["TEMP"] = temp_dir
+    os.environ["TMP"] = temp_dir
+except Exception:
+    pass
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Browser, Page

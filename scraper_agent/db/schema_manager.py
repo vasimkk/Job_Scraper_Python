@@ -39,7 +39,30 @@ def initialize_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_jobs_embedding ON jobs USING hnsw (job_embedding vector_cosine_ops);"
             )
 
+    sync_sequences()
     logger.info("Database schema initialized successfully.")
+
+
+def sync_sequences() -> None:
+    """Ensures all table primary key sequences are synchronized with current MAX(id)."""
+    tables = ["companies", "job_sources", "jobs", "scrape_runs"]
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for t in tables:
+                    cur.execute(f"SELECT COALESCE(MAX(id), 0) FROM {t}")
+                    max_id = cur.fetchone()[0]
+                    cur.execute(f"SELECT pg_get_serial_sequence('{t}', 'id')")
+                    seq_res = cur.fetchone()
+                    seq_name = seq_res[0] if seq_res else None
+                    if seq_name:
+                        if max_id > 0:
+                            cur.execute(f"SELECT setval('{seq_name}', {max_id}, true)")
+                        else:
+                            cur.execute(f"SELECT setval('{seq_name}', 1, false)")
+        logger.info("Database primary key sequences synchronized.")
+    except Exception as exc:
+        logger.warning(f"Could not sync database sequences: {exc}")
 
 
 def seed_database() -> None:
